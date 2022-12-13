@@ -1,4 +1,62 @@
-use core::panic;
+//! Serialize Rust types (including structs) like Solidity's `abi.encode(...)`.
+//!
+//! Optimized for low-memory devices that do not need/want the entire serialized
+//! value in memory at the same time. For example because it is only needed in
+//! this format for hashing or signing.
+//!
+//! # Important
+//! This Serializer goes over the objects multiple times at runtime. The length
+//! of dynamically-sized types (like `Vec<T>` MUST-NOT change during the
+//! serialization). When using custom [Serialize] trait implementations or when
+//! using `#[serde(with = "...")]` the borrow checker CAN-NOT ensure this
+//! behavior, for example when generating a random `bytes` value inside of
+//! [Serialize::serialize()].
+//!
+//! # Difference to other Serializers
+//! To abi encode a dynamic length value (e.g. a struct/tuple) we have to know
+//! first write the static sized parts (Head), including the offset for any
+//! dynamic length field, before we can write the fields that have a dynamic
+//! length (e.g. `uint256[]` or `bytes`).
+//!
+//! While we could buffer the output by storing it in memory until everything is
+//! processed (if there is any dynamic length field the entire data structure
+//! has to be buffered because the first byte may be known last), this would not
+//! be ideal, especially on embedded devices. Mainly because abi encoded values
+//! are really space in-efficient: A lot of offsets and everything is padded to
+//! 256 bits.
+//!
+//! Implementing it as suggested by the Solidity docs is not ideal for embedded
+//! devices either, because it still requires the entire serialized value to be
+//! stored in memory.
+//!
+//! Instead we go over the data structure multiple times:
+//! 1. [Pass::HeadSize]: Collect the length of the static-length part (Head) for
+//!    each type. This can be done at compile-time but currently is not (most
+//!    likely). Additionally, this Pass collects information on whether a type
+//!    is dynamic or not, which the next Pass needs to know.
+//! 2. [Pass::Head]: Write the static part. For all types containing
+//!    dynamic-length information (including structs with dynamic fields), only
+//!    an offset to where the dynamic part will be is written in this Pass.
+//! 3. [Pass::TailSize]: Collect the length of the dynamic-length part (Tail)
+//!    for each type we have to write an offset for (called from the Head pass).
+//!    This cannot be done at compile-time and must be separate from the Head
+//!    pass, since the Head pass for dynamic structs and lists (sequences) has
+//!    to be written inside its Tail.
+//! 4. [Pass::Tail]: Write the dynamic part. Structs containing dynamic-length
+//!    types execute [Pass::Head] from here instead of from [Pass::Head],
+//!    otherwise the data for staticly-sized types would be written in the wrong
+//!    place.
+//!
+//! # Potential Improvements
+//! - Make sure that computing [Pass::HeadSize] happens only once, at
+//!   compile-time
+//! - Make sure [Pass::TailSize] is sufficiently inlined, as it needs to be
+//!   known in all parents (structs/lists/sequences) to be able to write
+//!   offsets. In some situations it may not even be needed, I don't know if
+//!   those are optimized away by the compiler.
+//! - Look at which part the compiler actually optimizes away and what is
+//!   inlined. We may have to implement the passes differently if the compiler
+//!   doesn't inline them due to the match statement.
 
 use super::error::{Error, Result};
 use serde::{
@@ -62,11 +120,31 @@ impl Serialize for DynamicMarker {
     }
 }
 
+/// Flag to prints additional information on non-data slots via stdout.
+///
+/// Useful when the result differs from the expected value. After returning a
+/// slot that does not contain the data itself, the [Serializer] prints a line
+/// via stdout to explain the meaning of the last byte.
+///
+/// This may be moved to a feature flag at some point.
 #[cfg(feature = "std")]
 const DO_EXPLAIN: bool = false;
+
+/// Flag to print even more information (which methods on [Serializer] have been
+/// called).
+///
+/// This could probably be done with a debugger, too: Put a tracepoint on every
+/// method on the [Serializer]. This is just a convenience feature as an
+/// extension to [DO_EXPLAIN] that was really useful while debugging the
+/// [Serializer].
+///
+/// This may be removed completely in the future.
 #[cfg(feature = "std")]
 const DO_TRACE: bool = false;
 
+/// Helper macro to print slot explanations.
+///
+/// Does nothing in a no_std environment or when [DO_EXPLAIN] is `false`.
 macro_rules! explain {
     ($($arg:tt)*) => {
         #[cfg(feature = "std")]
@@ -79,6 +157,9 @@ macro_rules! explain {
     };
 }
 
+/// Helper function to print called methods on the [Serializer].
+///
+/// Does nothing in a no_std environment or when [DO_TRACE] is `false`.
 fn trace(_method: &str, _pass: &Pass) {
     #[cfg(feature = "std")]
     if DO_TRACE {
@@ -92,10 +173,25 @@ fn trace(_method: &str, _pass: &Pass) {
     }
 }
 
+/// Implement this trait to use [to_writer()].
+///
+/// [Writer::write()] is called whenever the [Serializer] has serialized new
+/// data. Currently this always writes slots of 32 bytes, but this may change in
+/// the future.
+///
+/// We are not using the [std::io::Write] trait because it is not available in a
+/// no_std environment. One option to make it compatible with [std::io::Write]
+/// would be to auto-implement this trait for everything implementing
+/// [std::io::Write], but this requires storing the [std::io::Error] in [Error]
+/// and a few other changes.
 pub trait Writer {
     fn write(&mut self, slot: &[u8]);
 }
 
+/// Implementation of [Writer] that does nothing when receiving serialized data.
+///
+/// Currently used during the size computation ([Pass::HeadSize] and
+/// [Pass::TailSize]).
 struct NoWriter;
 
 impl Writer for NoWriter {
