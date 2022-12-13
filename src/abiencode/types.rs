@@ -1,10 +1,13 @@
 use core::fmt::Debug;
 
 use rand::{distributions::Standard, prelude::Distribution};
-use secp256k1::{PublicKey, ThirtyTwoByteHash};
 use serde::Serialize;
-use sha3::{Digest, Keccak256};
 use uint::construct_uint;
+
+#[cfg(feature = "secp256k1")]
+use secp256k1::{PublicKey, ThirtyTwoByteHash};
+#[cfg(feature = "secp256k1")]
+use sha3::{Digest, Keccak256};
 
 macro_rules! impl_hex_debug {
     ($T:ident) => {
@@ -78,6 +81,8 @@ bytesN!(Bytes31, 31);
 bytesN!(Bytes32, 32);
 
 bytesN!(Hash, 32);
+
+#[cfg(feature = "secp256k1")]
 impl ThirtyTwoByteHash for Hash {
     fn into_32(self) -> [u8; 32] {
         self.0
@@ -142,6 +147,7 @@ impl Serialize for Address {
     }
 }
 
+#[cfg(feature = "secp256k1")]
 impl From<PublicKey> for Address {
     fn from(pk: PublicKey) -> Self {
         // See https://ethereum.stackexchange.com/questions/65233/goethereum-getting-public-key-from-private-key-hex-formatting

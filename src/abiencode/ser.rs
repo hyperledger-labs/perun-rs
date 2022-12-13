@@ -696,6 +696,7 @@ where
         Err(Error::TypeNotRepresentable("struct variant"))
     }
 
+    #[cfg(not(feature = "std"))]
     fn collect_str<T: ?Sized>(self, _value: &T) -> Result<()>
     where
         T: core::fmt::Display,
