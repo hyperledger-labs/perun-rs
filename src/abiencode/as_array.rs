@@ -1,6 +1,6 @@
 //! Serialize any `&[T]` as solidity `T[N]` (fixed-size array).
 //!
-//! Usefull to hide a `Vec<T>` as a fixed-size array or when using const
+//! Useful to hide a `Vec<T>` as a fixed-size array or when using const
 //! generics.
 //!
 //! The length of the fixed-size array is taken from the length of the slice and
