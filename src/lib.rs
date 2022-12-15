@@ -17,21 +17,10 @@ mod abiencode {
     #[cfg(test)]
     pub mod tests;
 }
-
-/// Handles the creation and verification of (Ethereum) Signatures.
-///
-/// Layout and Content of this module will most likely change in the near future
-/// when adding support for the `k256` library, which has support for no_std.
-mod sig {
-    #[cfg(feature = "secp256k1")]
-    mod secp256k1;
-    #[cfg(feature = "secp256k1")]
-    pub use self::secp256k1::{eth_sign, recover_signer};
-}
+pub mod sig;
 
 pub mod channel;
 mod client;
 pub mod wire;
 
-pub use abiencode::types::Address;
 pub use client::PerunClient;

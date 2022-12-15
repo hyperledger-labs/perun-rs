@@ -1,4 +1,5 @@
 use crate::channel::{LedgerChannelProposal, ProposedChannel};
+use crate::sig::Signer;
 use crate::wire::{MessageBus, ParticipantMessage};
 use core::fmt::Debug;
 
@@ -16,12 +17,13 @@ use core::fmt::Debug;
 #[derive(Debug)]
 pub struct PerunClient<B: MessageBus> {
     pub(crate) bus: B,
+    signer: Signer,
 }
 
 impl<B: MessageBus> PerunClient<B> {
     /// Creates a new [PerunClient] with the given [MessageBus].
-    pub fn new(bus: B) -> Self {
-        PerunClient { bus }
+    pub fn new(bus: B, signer: Signer) -> Self {
+        PerunClient { bus, signer }
     }
 
     /// Propose a new channel with the given parameters/proposal and send a

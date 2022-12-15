@@ -5,10 +5,10 @@ use perun::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
         Asset, LedgerChannelProposal,
     },
+    sig::Signer,
     wire::{FunderMessage, MessageBus, ParticipantMessage, WatcherMessage},
-    Address, PerunClient,
+    PerunClient,
 };
-use secp256k1::{All, Secp256k1, SecretKey};
 use std::sync::mpsc;
 use tokio;
 
@@ -44,14 +44,6 @@ impl MessageBus for &Bus {
     }
 }
 
-/// Small helper function to setup signing and public keys for both parties.
-/// Will most likely be done automatically in the public API.
-fn setup_crypto() -> (Secp256k1<All>, Address, SecretKey) {
-    let secp = Secp256k1::new();
-    let (sk, pk) = secp.generate_keypair(&mut rand::thread_rng());
-    (secp, pk.into(), sk)
-}
-
 /// Helper macro to print significant places in the protocol.
 macro_rules! print_bold {
     ($($arg:tt)*) => {
@@ -72,8 +64,9 @@ macro_rules! print_user_interaction {
 
 /// Alice: Proposes new channel.
 async fn alice(bus: Bus) {
-    let (secp, addr, sk) = setup_crypto();
-    let client = PerunClient::new(&bus);
+    let signer = Signer::new(&mut rand::thread_rng());
+    let addr = signer.addr;
+    let client = PerunClient::new(&bus, signer);
 
     // Create channel proposal (user configuration)
     print_user_interaction!("Alice proposes a channel");
@@ -115,12 +108,13 @@ async fn alice(bus: Bus) {
 
 /// Bob: Reacts to a proposed channel.
 async fn bob(bus: Bus) {
-    let (secp, addr, sk) = setup_crypto();
-    let c = PerunClient::new(&bus);
+    let signer = Signer::new(&mut rand::thread_rng());
+    let addr = signer.addr;
+    let client = PerunClient::new(&bus, signer);
 
     // Wait for Channel Proposal, then accept it
     let mut channel = match bus.rx.recv().unwrap() {
-        ParticipantMessage::ChannelProposal(prop) => c.handle_proposal(prop),
+        ParticipantMessage::ChannelProposal(prop) => client.handle_proposal(prop),
         _ => panic!("Unexpected message"),
     };
     if ACCEPT_PROPOSAL {

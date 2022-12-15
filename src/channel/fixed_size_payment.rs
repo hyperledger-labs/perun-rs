@@ -211,9 +211,9 @@ mod tests {
     #[cfg(feature = "secp256k1")]
     #[test]
     fn state_1a2p_sign() {
-        use crate::sig::eth_sign;
         use rand::{rngs::StdRng, SeedableRng};
-        use secp256k1::Secp256k1;
+
+        use crate::sig::Signer;
 
         /*
         ```solidity
@@ -228,22 +228,20 @@ mod tests {
 
         let hash = abiencode::to_hash(&state).unwrap();
 
-        let secp = Secp256k1::new();
         // Do not use that on any real device, this is just for testing.
         let mut rng = StdRng::seed_from_u64(0);
-        let (sk, pk) = secp.generate_keypair(&mut rng);
+        let signer = Signer::new(&mut rng);
 
-        let sig = eth_sign(&secp, sk, hash).unwrap();
-        let addr: Address = pk.into();
+        let sig = signer.sign_eth(hash);
 
-        println!("Signer: 0x{:}", addr.0.encode_hex::<String>());
+        println!("Signer: 0x{:}", signer.addr.0.encode_hex::<String>());
         println!("Sig: 0x{}", sig.0.encode_hex::<String>());
 
         // Test against some known good values (constant because we seed the
         // randomness with 0). When changing these make sure that they are
         // accepted by a smart contract.
         assert_eq!(
-            addr.0.encode_hex::<String>(),
+            signer.addr.0.encode_hex::<String>(),
             "0xa9572220348b1080264e81c0779f77c144790cd6"[2..]
         );
         assert_eq!(
