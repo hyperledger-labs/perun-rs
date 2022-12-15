@@ -14,6 +14,10 @@ use tokio;
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
 const ACCEPT_PROPOSAL: bool = true;
+// Note that, due to the example MessageBus implementation, both threads hang if
+// neither signs it.
+const ALICE_SIGNS: bool = true;
+const BOB_SIGNS: bool = true;
 
 /// Message bus representing a tcp connection. For simplicity only using
 /// [std::sync::mpsc] and printing the data to stdout.
@@ -98,10 +102,29 @@ async fn alice(bus: Bus) {
         _ => panic!("Unexpected message"),
     }
 
-    print_bold!("Both agreed on proposal and nonces, Both sign it");
+    print_bold!(
+        "Both agreed on proposal and nonces, Both sign the initial state and exchange signatures"
+    );
 
     // Go to Phase 2: Signing the initial state
-    channel.build().unwrap();
+    let mut channel = channel.build().unwrap();
+
+    if ALICE_SIGNS {
+        channel.sign().unwrap();
+    }
+    match bus.rx.recv() {
+        Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
+            channel.add_signature(msg).unwrap();
+        }
+        Ok(_) => panic!("Unexpected message"),
+        Err(_) => {
+            // In reality some kind of timeout
+            println!("Alice done: Did not receive Signature from Bob");
+            return;
+        }
+    }
+
+    print_bold!("Alice: Received all signatures, send to watcher/funder");
 
     println!("Alice done");
 }
@@ -127,7 +150,24 @@ async fn bob(bus: Bus) {
     }
 
     // Go to Phase 2: Signing the initial state
-    channel.build().unwrap();
+    let mut channel = channel.build().unwrap();
+
+    if BOB_SIGNS {
+        channel.sign().unwrap();
+    }
+    match bus.rx.recv() {
+        Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
+            channel.add_signature(msg).unwrap();
+        }
+        Ok(_) => panic!("Unexpected message"),
+        Err(_) => {
+            // In reality some kind of timeout
+            println!("Bob done: Did not receive Signature from Alice");
+            return;
+        }
+    }
+
+    print_bold!("Bob: Received all signatures, send to watcher/funder");
 
     println!("Bob done");
 }

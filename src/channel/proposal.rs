@@ -6,6 +6,7 @@
 //! data in rust (e.g. using `Vec<T>` vs no-heap `Vec<T>` vs `fixed-size<A,P>`).
 
 use super::{
+    agreed_upon::AgreedUponChannel,
     fixed_size_payment::{self, Params, State},
     NonceShare, PartID,
 };
@@ -50,7 +51,6 @@ pub enum BuildError {
     AbiEncodeError(abiencode::Error),
     MissingAccResponse(PartID),
 }
-
 impl From<abiencode::Error> for BuildError {
     fn from(e: abiencode::Error) -> Self {
         Self::AbiEncodeError(e)
@@ -156,7 +156,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     }
 
     /// Progress to the next phase: Signing the initial state.
-    pub fn build(self) -> Result<(), BuildError> {
+    pub fn build(self) -> Result<AgreedUponChannel<'a, B>, BuildError> {
         // Make sure we have responses from all participants
         for (index, res) in self.responses.iter().enumerate() {
             if res.is_none() {
@@ -184,17 +184,18 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             ledger_channel: true,
             virtual_channel: false,
         };
-        let state = State::new(params, self.proposal.init_bals)?;
+        let init_state = State::new(params, self.proposal.init_bals)?;
 
-        // TODO: Add init_state and params to the proposed channel (self)
-        // self.init_state = Some(state);
-        // self.params = Some(params);
-
-        Ok(())
+        Ok(AgreedUponChannel::new(
+            self.client,
+            self.part_id,
+            init_state,
+            params,
+        ))
     }
 }
 
-impl<'a, B: MessageBus> TryFrom<ProposedChannel<'a, B>> for () {
+impl<'a, B: MessageBus> TryFrom<ProposedChannel<'a, B>> for AgreedUponChannel<'a, B> {
     type Error = BuildError;
 
     fn try_from(value: ProposedChannel<'a, B>) -> Result<Self, Self::Error> {

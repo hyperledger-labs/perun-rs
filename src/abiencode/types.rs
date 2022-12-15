@@ -130,7 +130,7 @@ impl Distribution<U256> for Standard {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Address(pub [u8; 20]);
 impl_hex_debug!(Address);
 

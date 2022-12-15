@@ -17,7 +17,7 @@ use core::fmt::Debug;
 #[derive(Debug)]
 pub struct PerunClient<B: MessageBus> {
     pub(crate) bus: B,
-    signer: Signer,
+    pub(crate) signer: Signer,
 }
 
 impl<B: MessageBus> PerunClient<B> {

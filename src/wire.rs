@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 
-use crate::channel::{LedgerChannelProposal, LedgerChannelProposalAcc};
+use crate::channel::{
+    LedgerChannelProposal, LedgerChannelProposalAcc, LedgerChannelUpdateAccepted,
+};
 
 /// Low-Level abstraction over the network configuration.
 ///
@@ -28,4 +30,5 @@ pub enum ParticipantMessage {
     ChannelProposal(LedgerChannelProposal),
     ProposalAccepted(LedgerChannelProposalAcc),
     ProposalRejected,
+    ChannelUpdateAccepted(LedgerChannelUpdateAccepted),
 }
