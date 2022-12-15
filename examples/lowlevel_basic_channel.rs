@@ -1,8 +1,4 @@
 //! Example/Walkthrough demonstrating the low-level API (subject to change).
-//!
-//! Required feature flags:
-//! - std
-//! - secp256k1
 
 use perun::{
     channel::{

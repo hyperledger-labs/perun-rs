@@ -20,3 +20,7 @@ rand = { features = ["getrandom"] }
 default = ["std"]
 std = ["serde/std", "rand/std_rng"]
 secp256k1 = ["dep:secp256k1", "std"]
+
+[[example]]
+name = "lowlevel_basic_channel"
+required-features = ["secp256k1"]
