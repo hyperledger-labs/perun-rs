@@ -1,8 +1,11 @@
 use core::fmt::Debug;
 
-use crate::channel::{
-    LedgerChannelFundingRequest, LedgerChannelProposal, LedgerChannelProposalAcc,
-    LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
+use crate::{
+    abiencode::types::Hash,
+    channel::{
+        LedgerChannelFundingRequest, LedgerChannelProposal, LedgerChannelProposalAcc,
+        LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
+    },
 };
 
 /// Low-Level abstraction over the network configuration.
@@ -19,12 +22,14 @@ pub trait MessageBus: Debug {
 #[derive(Debug)]
 pub enum WatcherMessage {
     WatchRequest(LedgerChannelWatchRequest),
+    WatchRequestAck { id: Hash },
 }
 
 /// Messages sent to/from the Funder service.
 #[derive(Debug)]
 pub enum FunderMessage {
     FundingRequest(LedgerChannelFundingRequest),
+    Funded { id: Hash },
 }
 
 /// Messages sent between participants of a channel.

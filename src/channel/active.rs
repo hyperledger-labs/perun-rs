@@ -1,4 +1,4 @@
-use super::{active::ActiveChannel, fixed_size_payment, PartID};
+use super::{fixed_size_payment, PartID};
 use crate::{
     abiencode::types::{Hash, Signature},
     wire::MessageBus,
@@ -11,9 +11,15 @@ type State = fixed_size_payment::State<ASSETS, PARTICIPANTS>;
 type Params = fixed_size_payment::Params<PARTICIPANTS>;
 
 #[derive(Debug)]
-pub struct SignedChannel<'a, B: MessageBus>(ActiveChannel<'a, B>);
+pub struct ActiveChannel<'a, B: MessageBus> {
+    part_id: PartID,
+    client: &'a PerunClient<B>,
+    state: State,
+    params: Params,
+    signatures: [Signature; PARTICIPANTS],
+}
 
-impl<'a, B: MessageBus> SignedChannel<'a, B> {
+impl<'a, B: MessageBus> ActiveChannel<'a, B> {
     pub(super) fn new(
         client: &'a PerunClient<B>,
         part_id: PartID,
@@ -21,16 +27,16 @@ impl<'a, B: MessageBus> SignedChannel<'a, B> {
         params: Params,
         signatures: [Signature; PARTICIPANTS],
     ) -> Self {
-        SignedChannel(ActiveChannel::new(
-            client, part_id, init_state, params, signatures,
-        ))
-    }
-
-    pub fn mark_funded(self) -> ActiveChannel<'a, B> {
-        self.0
+        ActiveChannel {
+            part_id,
+            client,
+            state: init_state,
+            params,
+            signatures,
+        }
     }
 
     pub fn channel_id(&self) -> Hash {
-        self.0.channel_id()
+        self.state.channel_id()
     }
 }

@@ -9,8 +9,8 @@ use perun::{
     wire::{FunderMessage, MessageBus, ParticipantMessage, WatcherMessage},
     PerunClient,
 };
-use std::sync::mpsc;
-use tokio;
+use std::{fmt::Debug, sync::mpsc};
+use tokio::{self, task::JoinHandle};
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
 const ACCEPT_PROPOSAL: bool = true;
@@ -19,6 +19,13 @@ const ACCEPT_PROPOSAL: bool = true;
 const ALICE_SIGNS: bool = true;
 const BOB_SIGNS: bool = true;
 
+/// For simplicity of the communication channels, the Watcher and Funder are
+/// implemented in the same thread in this example.
+enum ServiceMsg {
+    Watcher(WatcherMessage),
+    Funder(FunderMessage),
+}
+
 /// Message bus representing a tcp connection. For simplicity only using
 /// [std::sync::mpsc] and printing the data to stdout.
 #[derive(Debug)]
@@ -26,15 +33,19 @@ struct Bus {
     participant: usize,
     tx: mpsc::Sender<ParticipantMessage>,
     rx: mpsc::Receiver<ParticipantMessage>,
+    service_tx: mpsc::Sender<ServiceMsg>,
+    service_rx: mpsc::Receiver<ServiceMsg>,
 }
 
 impl MessageBus for &Bus {
     fn send_to_watcher(&self, msg: WatcherMessage) {
         println!("{}->Watcher: {:#?}", PARTICIPANTS[self.participant], msg);
+        self.service_tx.send(ServiceMsg::Watcher(msg)).unwrap();
     }
 
     fn send_to_funder(&self, msg: FunderMessage) {
         println!("{}->Funder: {:#?}", PARTICIPANTS[self.participant], msg);
+        self.service_tx.send(ServiceMsg::Funder(msg)).unwrap();
     }
 
     fn send_to_participants(&self, msg: ParticipantMessage) {
@@ -126,6 +137,13 @@ async fn alice(bus: Bus) {
 
     print_bold!("Alice: Received all signatures, send to watcher/funder");
     let channel = channel.build().unwrap();
+    // Wait for Funded and WatchRequestAck messages (content not checked in this
+    // example)
+    bus.service_rx.recv().unwrap();
+    bus.service_rx.recv().unwrap();
+
+    print_bold!("Alice: Received Funded + WatchAck Message => Channel can be used");
+    channel.mark_funded();
 
     println!("Alice done");
 }
@@ -170,29 +188,83 @@ async fn bob(bus: Bus) {
 
     print_bold!("Bob: Received all signatures, send to watcher/funder");
     let channel = channel.build().unwrap();
+    // Wait for Funded and WatchRequestAck messages (content not checked in this
+    // example)
+    bus.service_rx.recv().unwrap();
+    bus.service_rx.recv().unwrap();
+
+    print_bold!("Bob: Received Funded + WatchAck Message => Channel can be used");
+    channel.mark_funded();
 
     println!("Bob done");
+}
+
+async fn service(
+    participant: usize,
+    snd: mpsc::Sender<ServiceMsg>,
+    rcv: mpsc::Receiver<ServiceMsg>,
+) {
+    loop {
+        match rcv.recv() {
+            Ok(ServiceMsg::Watcher(WatcherMessage::WatchRequest(msg))) => {
+                let res = WatcherMessage::WatchRequestAck {
+                    id: msg.state.channel_id(),
+                };
+                println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
+                snd.send(ServiceMsg::Watcher(res)).unwrap();
+            }
+            Ok(ServiceMsg::Watcher(_)) => panic!("Invalid Message"),
+            Ok(ServiceMsg::Funder(FunderMessage::FundingRequest(msg))) => {
+                let res = FunderMessage::Funded {
+                    id: msg.state.channel_id(),
+                };
+                println!("Funder->{}: {:#?}", PARTICIPANTS[participant], res);
+                snd.send(ServiceMsg::Funder(res)).unwrap();
+            }
+            Ok(ServiceMsg::Funder(_)) => panic!("Invalid Message"),
+            Err(_) => {
+                println!("Service done: Channel was closed");
+                return;
+            }
+        }
+    }
+}
+
+fn setup_participant(
+    participant: usize,
+    snd: mpsc::Sender<ParticipantMessage>,
+    rcv: mpsc::Receiver<ParticipantMessage>,
+) -> (Bus, JoinHandle<()>) {
+    let (participant_snd, participant_rcv) = mpsc::channel();
+    let (service_snd, service_rcv) = mpsc::channel();
+    let bus = Bus {
+        participant,
+        rx: rcv,
+        tx: snd,
+        service_tx: service_snd,
+        service_rx: participant_rcv,
+    };
+
+    let service_handle = tokio::spawn(service(participant, participant_snd, service_rcv));
+    (bus, service_handle)
 }
 
 /// Main example code: Set up communication channels and spawn each party in a
 /// tokio thread.
 #[tokio::main]
 async fn main() {
-    let bob_to_alice = mpsc::channel();
-    let alice_to_bob = mpsc::channel();
+    // Alice <-> Bob
+    let (alice_snd, alice_rcv) = mpsc::channel();
+    let (bob_snd, bob_rcv) = mpsc::channel();
 
-    let a_handle = tokio::spawn(alice(Bus {
-        participant: 0,
-        tx: alice_to_bob.0,
-        rx: bob_to_alice.1,
-    }));
+    let (alice_bus, as_handle) = setup_participant(0, alice_snd, bob_rcv);
+    let a_handle = tokio::spawn(alice(alice_bus));
 
-    let b_handle = tokio::spawn(bob(Bus {
-        participant: 1,
-        tx: bob_to_alice.0,
-        rx: alice_to_bob.1,
-    }));
+    let (bob_bus, bs_handle) = setup_participant(1, bob_snd, alice_rcv);
+    let b_handle = tokio::spawn(bob(bob_bus));
 
     a_handle.await.unwrap();
     b_handle.await.unwrap();
+    as_handle.await.unwrap();
+    bs_handle.await.unwrap();
 }
