@@ -5,11 +5,7 @@
 //! arbitrary channel sizes and potentially even arbitrary ways to represent the
 //! data in rust (e.g. using `Vec<T>` vs no-heap `Vec<T>` vs `fixed-size<A,P>`).
 
-use super::{
-    agreed_upon::AgreedUponChannel,
-    fixed_size_payment::{self, Params, State},
-    NonceShare, PartID,
-};
+use super::{agreed_upon::AgreedUponChannel, fixed_size_payment, NonceShare, PartID};
 use crate::{
     abiencode::{
         self,
@@ -20,8 +16,12 @@ use crate::{
 };
 use sha3::{Digest, Sha3_256};
 
-type Allocation = fixed_size_payment::Allocation<1, 2>;
-type Balances = fixed_size_payment::Balances<1, 2>;
+const ASSETS: usize = 1;
+const PARTICIPANTS: usize = 2;
+type Allocation = fixed_size_payment::Allocation<ASSETS, PARTICIPANTS>;
+type Balances = fixed_size_payment::Balances<ASSETS, PARTICIPANTS>;
+type State = fixed_size_payment::State<ASSETS, PARTICIPANTS>;
+type Params = fixed_size_payment::Params<PARTICIPANTS>;
 
 /// Channel configuration (also exchanged over the network)
 #[derive(Debug, Clone, Copy)]
@@ -157,29 +157,43 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
 
     /// Progress to the next phase: Signing the initial state.
     pub fn build(self) -> Result<AgreedUponChannel<'a, B>, BuildError> {
-        // Make sure we have responses from all participants
-        for (index, res) in self.responses.iter().enumerate() {
-            if res.is_none() {
-                return Err(BuildError::MissingAccResponse(index + 1));
-            }
-        }
+        let mut participants = [Address::default(); PARTICIPANTS];
+        participants[0] = self.proposal.participant;
 
         // Go-Perun does NOT use keccak256 here, probably to be less dependent
         // on Ethereum. We do the same here.
         let mut hasher = Sha3_256::new();
-        for response in self.responses {
-            hasher.update(response.unwrap().nonce_share.0);
+
+        // Go through all responses and make sure none is missing. Additionally
+        // collect information needed later.
+        //
+        // Call combining it into a single loop premature optimization if you
+        // want, but I didn't like that two loops either required to call
+        // `unwrap()` or `unwrap_unchecked()`, while not knowing if the compiler
+        // combines it into one loop. Nor did I find a good way to do this
+        // purely with iterators. This might even be more readable than two
+        // loops using `unwrap()` or `unwrap_unchecked()`, where you have to
+        // argue why it is save to do so. (I didn't want to introduce another
+        // intermediate representation array, which I don't know if the compiler
+        // would optimize away).
+        for (index, res) in self.responses.iter().enumerate() {
+            // Unwrap all responses, returning an error if one is missing
+            let res = res.ok_or(BuildError::MissingAccResponse(index + 1))?;
+
+            // Store in new participants list that doesn't use options and
+            // combine the nonces
+            participants[index + 1] = res.participant;
+            hasher.update(res.nonce_share.0);
         }
+
+        // Finalize the nonce.
         let nonce = U256::from_big_endian(hasher.finalize().as_slice());
 
         // Create the initial state
-        let params: Params<2> = Params {
+        let params: Params = Params {
             challenge_duration: self.proposal.challenge_duration,
             nonce: nonce,
-            participants: [
-                self.proposal.participant,
-                self.responses[0].unwrap().participant,
-            ],
+            participants,
             app: [],
             ledger_channel: true,
             virtual_channel: false,
@@ -188,6 +202,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
 
         Ok(AgreedUponChannel::new(
             self.client,
+            self.proposal.funding_agreement,
             self.part_id,
             init_state,
             params,

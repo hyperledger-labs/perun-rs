@@ -26,7 +26,7 @@ pub struct Params<const P: usize> {
 }
 
 /// Stores the complete state of a channel.
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Copy, Clone)]
 pub struct State<const A: usize, const P: usize> {
     id: Hash,
     version: u64,

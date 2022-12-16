@@ -1,7 +1,8 @@
 use core::fmt::Debug;
 
 use crate::channel::{
-    LedgerChannelProposal, LedgerChannelProposalAcc, LedgerChannelUpdateAccepted,
+    LedgerChannelFundingRequest, LedgerChannelProposal, LedgerChannelProposalAcc,
+    LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
 };
 
 /// Low-Level abstraction over the network configuration.
@@ -16,12 +17,14 @@ pub trait MessageBus: Debug {
 
 /// Messages sent to/from the Watcher service.
 #[derive(Debug)]
-pub enum WatcherMessage {}
+pub enum WatcherMessage {
+    WatchRequest(LedgerChannelWatchRequest),
+}
 
 /// Messages sent to/from the Funder service.
 #[derive(Debug)]
 pub enum FunderMessage {
-    // params, (init_state), init_alloc
+    FundingRequest(LedgerChannelFundingRequest),
 }
 
 /// Messages sent between participants of a channel.

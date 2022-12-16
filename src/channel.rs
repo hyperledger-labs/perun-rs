@@ -1,9 +1,12 @@
 mod agreed_upon;
 pub mod fixed_size_payment;
 mod proposal;
+mod signed;
 
 use crate::abiencode::types::{Address, Bytes32, U256};
-pub use agreed_upon::LedgerChannelUpdateAccepted;
+pub use agreed_upon::{
+    LedgerChannelFundingRequest, LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
+};
 use core::fmt::Debug;
 pub use proposal::{LedgerChannelProposal, LedgerChannelProposalAcc, ProposedChannel};
 use serde::Serialize;

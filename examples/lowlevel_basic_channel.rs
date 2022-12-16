@@ -30,11 +30,11 @@ struct Bus {
 
 impl MessageBus for &Bus {
     fn send_to_watcher(&self, msg: WatcherMessage) {
-        println!("{}->Watcher: {:?}", PARTICIPANTS[self.participant], msg);
+        println!("{}->Watcher: {:#?}", PARTICIPANTS[self.participant], msg);
     }
 
     fn send_to_funder(&self, msg: FunderMessage) {
-        println!("{}->Funder: {:?}", PARTICIPANTS[self.participant], msg);
+        println!("{}->Funder: {:#?}", PARTICIPANTS[self.participant], msg);
     }
 
     fn send_to_participants(&self, msg: ParticipantMessage) {
@@ -125,6 +125,7 @@ async fn alice(bus: Bus) {
     }
 
     print_bold!("Alice: Received all signatures, send to watcher/funder");
+    let channel = channel.build().unwrap();
 
     println!("Alice done");
 }
@@ -168,6 +169,7 @@ async fn bob(bus: Bus) {
     }
 
     print_bold!("Bob: Received all signatures, send to watcher/funder");
+    let channel = channel.build().unwrap();
 
     println!("Bob done");
 }

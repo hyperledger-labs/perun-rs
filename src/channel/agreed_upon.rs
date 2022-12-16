@@ -1,16 +1,33 @@
-use super::{fixed_size_payment, PartID};
+use super::{fixed_size_payment, signed::SignedChannel, PartID};
 use crate::{
     abiencode::{
         self,
         types::{Address, Hash, Signature},
     },
     sig,
-    wire::{MessageBus, ParticipantMessage},
+    wire::{FunderMessage, MessageBus, ParticipantMessage, WatcherMessage},
     PerunClient,
 };
 
-type State = fixed_size_payment::State<1, 2>;
-type Params = fixed_size_payment::Params<2>;
+const ASSETS: usize = 1;
+const PARTICIPANTS: usize = 2;
+type State = fixed_size_payment::State<ASSETS, PARTICIPANTS>;
+type Params = fixed_size_payment::Params<PARTICIPANTS>;
+type Balances = fixed_size_payment::Balances<ASSETS, PARTICIPANTS>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct LedgerChannelWatchRequest {
+    pub params: Params,
+    pub state: State,
+    pub signatures: [Signature; PARTICIPANTS],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LedgerChannelFundingRequest {
+    pub funding_agreement: Balances,
+    pub params: Params,
+    pub state: State,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelUpdateAccepted {
@@ -51,9 +68,15 @@ impl From<sig::Error> for AddSignatureError {
 }
 
 #[derive(Debug)]
+pub enum BuildError {
+    MissingSignatureResponse(PartID),
+}
+
+#[derive(Debug)]
 pub struct AgreedUponChannel<'a, B: MessageBus> {
     part_id: PartID,
     client: &'a PerunClient<B>,
+    funding_agreement: Balances,
     init_state: State,
     params: Params,
     signatures: [Option<Signature>; 2],
@@ -62,6 +85,7 @@ pub struct AgreedUponChannel<'a, B: MessageBus> {
 impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
     pub(super) fn new(
         client: &'a PerunClient<B>,
+        funding_agreement: Balances,
         part_id: PartID,
         init_state: State,
         params: Params,
@@ -69,9 +93,10 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         AgreedUponChannel {
             part_id,
             client,
+            funding_agreement,
             init_state,
             params,
-            signatures: [None; 2],
+            signatures: [None; PARTICIPANTS],
         }
     }
 
@@ -99,6 +124,8 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         }
     }
 
+    // This function allows adding our own signature if we really want. There is
+    // currently no easy way to get one, but it is possible.
     pub fn add_signature(
         &mut self,
         msg: LedgerChannelUpdateAccepted,
@@ -133,5 +160,48 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                 Ok(())
             }
         }
+    }
+
+    pub fn build(self) -> Result<SignedChannel<'a, B>, BuildError> {
+        // Make sure we have the signature from all participants. They have
+        // already been verified in `add_signature()` or we created it ourselves
+        // with `sign()`. At the same time, this loop collects the signatures
+        // for the next phase into an array.
+        let mut signatures: [Signature; PARTICIPANTS] = [Signature::default(); PARTICIPANTS];
+        for (part_id, s) in self.signatures.iter().enumerate() {
+            signatures[part_id] = s.ok_or(BuildError::MissingSignatureResponse(part_id))?;
+        }
+
+        self.client
+            .bus
+            .send_to_watcher(WatcherMessage::WatchRequest(LedgerChannelWatchRequest {
+                params: self.params,
+                state: self.init_state,
+                signatures: signatures,
+            }));
+
+        self.client
+            .bus
+            .send_to_funder(FunderMessage::FundingRequest(LedgerChannelFundingRequest {
+                funding_agreement: self.funding_agreement,
+                params: self.params,
+                state: self.init_state,
+            }));
+
+        Ok(SignedChannel::new(
+            self.client,
+            self.part_id,
+            self.init_state,
+            self.params,
+            signatures,
+        ))
+    }
+}
+
+impl<'a, B: MessageBus> TryFrom<AgreedUponChannel<'a, B>> for SignedChannel<'a, B> {
+    type Error = BuildError;
+
+    fn try_from(value: AgreedUponChannel<'a, B>) -> Result<Self, Self::Error> {
+        value.build()
     }
 }
