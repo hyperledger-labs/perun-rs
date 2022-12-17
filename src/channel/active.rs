@@ -16,9 +16,9 @@ type Params = fixed_size_payment::Params<PARTICIPANTS>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelUpdate {
-    state: State,
-    actor_idx: PartID,
-    sig: Signature,
+    pub state: State,
+    pub actor_idx: PartID,
+    pub sig: Signature,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -168,5 +168,14 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
                 state: self.state,
                 signatures: self.signatures,
             }))
+    }
+
+    // Use `update()` if the state has to change, too
+    pub fn close_normal<'ch>(
+        &'ch mut self,
+    ) -> Result<ChannelUpdate<'ch, 'cl, B>, ProposeUpdateError> {
+        let mut new_state = self.state.make_next_state();
+        new_state.is_final = true;
+        self.update(new_state)
     }
 }

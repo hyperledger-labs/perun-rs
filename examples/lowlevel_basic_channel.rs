@@ -23,8 +23,6 @@ const BOB_SEND_ADDITIONAL_WATCHER_UPDATE: bool = true; // Optional
 const ALICE_PROPOSE_NORMAL_CLOSE: bool = true; // True: Happy case
 const BOB_ACCEPTS_NORMAL_CLOSE: bool = true; // True: Happy case
 
-const BOB_STARTS_DISPUTE: bool = !BOB_ACCEPTS_NORMAL_CLOSE;
-
 /// For simplicity of the communication channels, the Watcher and Funder are
 /// implemented in the same thread in this example.
 enum ServiceMsg {
@@ -180,6 +178,25 @@ async fn alice(bus: Bus) {
 
     println!("\x1b[1mAlice: Current channel state\x1b[0m: {:#?}", channel);
 
+    if ALICE_PROPOSE_NORMAL_CLOSE {
+        print_user_interaction!("Alice: Initiate normal close");
+        let mut update = channel.close_normal().unwrap();
+        match bus.rx.recv() {
+            Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
+                update.participant_accepted(1, msg).unwrap();
+                update.apply().unwrap();
+                bus.service_rx.recv().unwrap(); // Receive Ack from Watcher
+            }
+            Ok(ParticipantMessage::ChannelUpdateRejected { .. }) => {
+                print_bold!("Alice: Aborting normal close, bob rejected");
+
+                // TODO: Demonstrate force close
+            }
+            Ok(_) => panic!("Unexpected message"),
+            Err(_) => panic!("Alice done: Did not receive response from Alice"),
+        }
+    }
+
     println!("Alice done");
 }
 
@@ -234,7 +251,7 @@ async fn bob(bus: Bus) {
     print_bold!("Bob: Received Funded + WatchAck Message => Channel can be used");
     let mut channel = channel.mark_funded();
 
-    print_bold!("Bob: Propose Update");
+    print_user_interaction!("Bob: Propose Update");
     let mut new_state = channel.state().make_next_state();
     // Transfer 10 wei (assuming that's the channels currency) from Alice
     // (channel proposer) to Bob.
@@ -285,6 +302,31 @@ async fn bob(bus: Bus) {
 
     println!("\x1b[1mBob: Current channel state\x1b[0m: {:#?}", channel);
 
+    if ALICE_PROPOSE_NORMAL_CLOSE {
+        match bus.rx.recv() {
+            Ok(ParticipantMessage::ChannelUpdate(msg)) => {
+                if msg.state.is_final {
+                    print_user_interaction!("Bob: Received close request, accept or reject");
+                } else {
+                    // In reality it can of course happen, as Bob does not know
+                    // what Alice will propose next.
+                    unreachable!("In this example this can never happen due to the scripted nature")
+                }
+
+                let mut update = channel.handle_update(msg).unwrap();
+                if BOB_ACCEPTS_NORMAL_CLOSE {
+                    update.accept().unwrap();
+                    update.apply().unwrap();
+                    bus.service_rx.recv().unwrap(); // Ack message for the new state.
+                } else {
+                    update.reject();
+                }
+            }
+            Ok(_) => panic!("Unexpected message"),
+            Err(_) => panic!("Bob done: Did not receive response from Alice"),
+        }
+    }
+
     println!("Bob done");
 }
 
@@ -321,7 +363,7 @@ async fn service(
             }
             Ok(ServiceMsg::Funder(_)) => panic!("Invalid Message"),
             Err(_) => {
-                println!("Service done: Channel was closed");
+                println!("Service done");
                 return;
             }
         }
