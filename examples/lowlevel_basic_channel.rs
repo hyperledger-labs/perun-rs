@@ -19,6 +19,7 @@ const ACCEPT_PROPOSAL: bool = true;
 const ALICE_SIGNS: bool = true;
 const BOB_SIGNS: bool = true;
 const ALICE_ACCEPTS_UPDATE: bool = true;
+const BOB_SEND_ADDITIONAL_WATCHER_UPDATE: bool = true;
 
 /// For simplicity of the communication channels, the Watcher and Funder are
 /// implemented in the same thread in this example.
@@ -245,12 +246,25 @@ async fn bob(bus: Bus) {
         Err(_) => panic!("Bob done: Did not receive response from Alice"),
     }
     update.apply().unwrap();
-    // Receive ack from Watcher. If we don't get an ack immediately it is not a
-    // problem, the application/caller/user of the low-level API has to at some
-    // point make sure to get the message to the Watcher. In this example we
-    // always read it, otherwise the channel will return errors and stop the
-    // service.
-    bus.service_rx.recv().unwrap();
+
+    // This can be used to keep the watcher up to date in case the communication
+    // channel is unreliable. You don't have to wait until receiving an
+    // acknowledgement (as indicated by the missing receive earlier). You can
+    // resend the current state whenever you want.
+    if BOB_SEND_ADDITIONAL_WATCHER_UPDATE {
+        print_bold!("Bob: Send current state to watcher (whenever the application wants)");
+        channel.send_current_state_to_watcher();
+    }
+
+    // When sending two state updates (even with the same content) to the
+    // watcher it will return two acknowledgements. To keep this example working
+    // we have to receive both. In a real application this would just update a
+    // counter keeping track of the last acknowledged state. The counter is
+    // currently not stored in the channel object.
+    bus.service_rx.recv().unwrap(); // Ack form update.apply()
+    if BOB_SEND_ADDITIONAL_WATCHER_UPDATE {
+        bus.service_rx.recv().unwrap(); // Ack from send_current_state_to_watcher()
+    }
 
     println!("\x1b[1mBob: Current channel state\x1b[0m: {:#?}", channel);
 

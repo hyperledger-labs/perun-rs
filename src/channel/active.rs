@@ -158,7 +158,10 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub(super) fn force_update(&mut self, new_state: State, signatures: [Signature; PARTICIPANTS]) {
         self.state = new_state;
         self.signatures = signatures;
+        self.send_current_state_to_watcher();
+    }
 
+    pub fn send_current_state_to_watcher(&self) {
         self.client
             .bus
             .send_to_watcher(WatcherMessage::Update(LedgerChannelWatchUpdate {
