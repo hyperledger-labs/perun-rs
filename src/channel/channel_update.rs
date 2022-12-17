@@ -24,15 +24,20 @@ impl From<abiencode::Error> for AcceptError {
 }
 
 #[derive(Debug)]
+pub struct MissingSignatureError {
+    pub part_id: PartID,
+}
+
+#[derive(Debug)]
 pub struct ChannelUpdate<'ch, 'cl, B: MessageBus> {
-    channel: &'ch ActiveChannel<'cl, B>,
+    channel: &'ch mut ActiveChannel<'cl, B>,
     new_state: State,
     signatures: [Option<Signature>; PARTICIPANTS],
 }
 
 impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
     pub(crate) fn new(
-        channel: &'ch ActiveChannel<'cl, B>,
+        channel: &'ch mut ActiveChannel<'cl, B>,
         new_state: State,
         sig_part_id: PartID,
         sig: Signature,
@@ -102,5 +107,20 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
                 Ok(())
             }
         }
+    }
+
+    pub fn signatures(&self) -> Result<[Signature; PARTICIPANTS], MissingSignatureError> {
+        let mut signatures: [Signature; PARTICIPANTS] = [Signature::default(); PARTICIPANTS];
+        for (part_id, s) in self.signatures.iter().enumerate() {
+            signatures[part_id] = s.ok_or(MissingSignatureError { part_id })?;
+        }
+
+        Ok(signatures)
+    }
+
+    pub fn apply(self) -> Result<(), MissingSignatureError> {
+        self.channel
+            .force_update(self.new_state, self.signatures()?);
+        Ok(())
     }
 }

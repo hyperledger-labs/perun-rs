@@ -1,4 +1,4 @@
-use super::{fixed_size_payment, ChannelUpdate, PartID};
+use super::{channel_update::MissingSignatureError, fixed_size_payment, ChannelUpdate, PartID};
 use crate::{
     abiencode::{
         self,
@@ -104,7 +104,10 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         self.params
     }
 
-    pub fn update(&self, new_state: State) -> Result<ChannelUpdate<B>, ProposeUpdateError> {
+    pub fn update<'ch>(
+        &'ch mut self,
+        new_state: State,
+    ) -> Result<ChannelUpdate<'ch, 'cl, B>, ProposeUpdateError> {
         // TODO: Verify a few things about the state (like no creation of new
         // assets).
 
@@ -122,10 +125,10 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         Ok(ChannelUpdate::new(self, new_state, self.part_id, sig))
     }
 
-    pub fn handle_update(
-        &self,
+    pub fn handle_update<'ch>(
+        &'ch mut self,
         msg: LedgerChannelUpdate,
-    ) -> Result<ChannelUpdate<B>, HandleUpdateError> {
+    ) -> Result<ChannelUpdate<'ch, 'cl, B>, HandleUpdateError> {
         // TODO: How to handle/prevent the case that this channel is already
         // closed? New channel type/dropped channel/runtime error?
 
@@ -144,5 +147,10 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         }
 
         Ok(ChannelUpdate::new(self, msg.state, msg.actor_idx, msg.sig))
+    }
+
+    pub(super) fn force_update(&mut self, new_state: State, signatures: [Signature; PARTICIPANTS]) {
+        self.state = new_state;
+        self.signatures = signatures;
     }
 }

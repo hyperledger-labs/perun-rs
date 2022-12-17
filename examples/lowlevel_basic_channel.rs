@@ -144,7 +144,7 @@ async fn alice(bus: Bus) {
     bus.service_rx.recv().unwrap();
 
     print_bold!("Alice: Received Funded + WatchAck Message => Channel can be used");
-    let channel = channel.mark_funded();
+    let mut channel = channel.mark_funded();
 
     // Wait until we receive an update proposal from bob (or whatever the
     // application wants to do in the meantime, Alice could also send update
@@ -160,9 +160,12 @@ async fn alice(bus: Bus) {
                 println!("Alice done: Configured to not accept the channel update");
                 return;
             }
+            update.apply().unwrap();
         }
         _ => panic!("Unexpected Message or channel closure"),
     }
+
+    println!("\x1b[1mAlice: Current channel state\x1b[0m: {:#?}", channel);
 
     println!("Alice done");
 }
@@ -213,7 +216,7 @@ async fn bob(bus: Bus) {
     bus.service_rx.recv().unwrap();
 
     print_bold!("Bob: Received Funded + WatchAck Message => Channel can be used");
-    let channel = channel.mark_funded();
+    let mut channel = channel.mark_funded();
 
     print_bold!("Bob: Propose Update");
     let mut new_state = channel.state().make_next_state();
@@ -235,6 +238,9 @@ async fn bob(bus: Bus) {
         Ok(_) => panic!("Unexpected message"),
         Err(_) => panic!("Bob done: Did not receive response from Alice"),
     }
+    update.apply().unwrap();
+
+    println!("\x1b[1mBob: Current channel state\x1b[0m: {:#?}", channel);
 
     println!("Bob done");
 }
