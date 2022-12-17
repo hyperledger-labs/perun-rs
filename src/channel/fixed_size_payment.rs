@@ -30,10 +30,10 @@ pub struct Params<const P: usize> {
 pub struct State<const A: usize, const P: usize> {
     id: Hash,
     version: u64,
-    outcome: Allocation<A, P>,
+    pub outcome: Allocation<A, P>,
     #[serde(with = "as_bytes")]
     app_data: [u8; 0],
-    is_final: bool,
+    pub is_final: bool,
 }
 
 impl<const A: usize, const P: usize> State<A, P> {
@@ -55,6 +55,23 @@ impl<const A: usize, const P: usize> State<A, P> {
             app_data: [],
             is_final: false,
         })
+    }
+
+    /// Create a new state that will replace this state.
+    ///
+    /// Having id and version as private fields forces the caller to not
+    /// accidentally write garbage to one of those fields, which could only be
+    /// cought by the Channels via panics or by returning an Error, thus
+    /// requiring extra checks at runtime. This forces compatibility at compile
+    /// time.
+    pub fn make_next_state(&self) -> Self {
+        State {
+            id: self.id,
+            version: self.version + 1,
+            outcome: self.outcome,
+            app_data: self.app_data,
+            is_final: self.is_final,
+        }
     }
 }
 

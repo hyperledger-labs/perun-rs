@@ -4,7 +4,7 @@ use crate::{
     abiencode::types::Hash,
     channel::{
         LedgerChannelFundingRequest, LedgerChannelProposal, LedgerChannelProposalAcc,
-        LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
+        LedgerChannelUpdate, LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
     },
 };
 
@@ -38,5 +38,7 @@ pub enum ParticipantMessage {
     ChannelProposal(LedgerChannelProposal),
     ProposalAccepted(LedgerChannelProposalAcc),
     ProposalRejected,
+    ChannelUpdate(LedgerChannelUpdate),
     ChannelUpdateAccepted(LedgerChannelUpdateAccepted),
+    ChannelUpdateRejected { id: Hash }, // TODO: This is a proposal ID, not the channel ID!
 }

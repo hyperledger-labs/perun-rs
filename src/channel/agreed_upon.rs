@@ -31,9 +31,9 @@ pub struct LedgerChannelFundingRequest {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelUpdateAccepted {
-    channel: Hash,
-    version: u64,
-    sig: Signature,
+    pub channel: Hash, // TODO: ProposalID, not channelID!???
+    pub version: u64,
+    pub sig: Signature,
 }
 
 #[derive(Debug)]
@@ -141,6 +141,12 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         let signer = self.client.signer.recover_signer(hash, msg.sig)?;
 
         // Verify signature is comming from a valid participant.
+        //
+        // TODO: There is currently a difference to go-perun, which gets the
+        // participant index by comparing `wire.Address`-es instead of ephemeral
+        // `wallet.Address`-es, then compares only against one `wallet.Address`.
+        // As long as both are unique this doesn't make a difference (not even
+        // in performance).
         let part_id: PartID = match self
             .params
             .participants

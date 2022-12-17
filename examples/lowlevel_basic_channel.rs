@@ -18,6 +18,7 @@ const ACCEPT_PROPOSAL: bool = true;
 // neither signs it.
 const ALICE_SIGNS: bool = true;
 const BOB_SIGNS: bool = true;
+const ALICE_ACCEPTS_UPDATE: bool = true;
 
 /// For simplicity of the communication channels, the Watcher and Funder are
 /// implemented in the same thread in this example.
@@ -143,7 +144,25 @@ async fn alice(bus: Bus) {
     bus.service_rx.recv().unwrap();
 
     print_bold!("Alice: Received Funded + WatchAck Message => Channel can be used");
-    channel.mark_funded();
+    let channel = channel.mark_funded();
+
+    // Wait until we receive an update proposal from bob (or whatever the
+    // application wants to do in the meantime, Alice could also send update
+    // proposals).
+    match bus.rx.recv() {
+        Ok(ParticipantMessage::ChannelUpdate(msg)) => {
+            let mut update = channel.handle_update(msg).unwrap();
+            print_user_interaction!("Alice accepts or rejects the update");
+            if ALICE_ACCEPTS_UPDATE {
+                update.accept().unwrap()
+            } else {
+                update.reject();
+                println!("Alice done: Configured to not accept the channel update");
+                return;
+            }
+        }
+        _ => panic!("Unexpected Message or channel closure"),
+    }
 
     println!("Alice done");
 }
@@ -194,7 +213,28 @@ async fn bob(bus: Bus) {
     bus.service_rx.recv().unwrap();
 
     print_bold!("Bob: Received Funded + WatchAck Message => Channel can be used");
-    channel.mark_funded();
+    let channel = channel.mark_funded();
+
+    print_bold!("Bob: Propose Update");
+    let mut new_state = channel.state().make_next_state();
+    // Transfer 10 wei (assuming that's the channels currency) from Alice
+    // (channel proposer) to Bob.
+    //
+    // There will be helper functions to do such simple changes and we'll most
+    // likely remove the `.0`.
+    new_state.outcome.balances.0[0].0[0] += 10.into();
+    new_state.outcome.balances.0[0].0[1] -= 10.into();
+    let mut update = channel.update(new_state).unwrap();
+    match bus.rx.recv() {
+        Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
+            update.participant_accepted(0, msg).unwrap();
+        }
+        Ok(ParticipantMessage::ChannelUpdateRejected { .. }) => {
+            print_bold!("Bob: Aborting update, alice rejected");
+        }
+        Ok(_) => panic!("Unexpected message"),
+        Err(_) => panic!("Bob done: Did not receive response from Alice"),
+    }
 
     println!("Bob done");
 }
