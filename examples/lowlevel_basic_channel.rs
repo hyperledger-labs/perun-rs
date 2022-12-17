@@ -16,10 +16,14 @@ const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
 const ACCEPT_PROPOSAL: bool = true;
 // Note that, due to the example MessageBus implementation, both threads hang if
 // neither signs it.
-const ALICE_SIGNS: bool = true;
-const BOB_SIGNS: bool = true;
-const ALICE_ACCEPTS_UPDATE: bool = true;
-const BOB_SEND_ADDITIONAL_WATCHER_UPDATE: bool = true;
+const ALICE_SIGNS: bool = true; // True: Happy case
+const BOB_SIGNS: bool = true; // True: Happy case
+const ALICE_ACCEPTS_UPDATE: bool = true; // True: Happy case
+const BOB_SEND_ADDITIONAL_WATCHER_UPDATE: bool = true; // Optional
+const ALICE_PROPOSE_NORMAL_CLOSE: bool = true; // True: Happy case
+const BOB_ACCEPTS_NORMAL_CLOSE: bool = true; // True: Happy case
+
+const BOB_STARTS_DISPUTE: bool = !BOB_ACCEPTS_NORMAL_CLOSE;
 
 /// For simplicity of the communication channels, the Watcher and Funder are
 /// implemented in the same thread in this example.
@@ -124,6 +128,9 @@ async fn alice(bus: Bus) {
 
     if ALICE_SIGNS {
         channel.sign().unwrap();
+    } else if !BOB_SIGNS {
+        println!("Alice done: Nobody is configured to sign the proposal, thus both will timeout");
+        return;
     }
     match bus.rx.recv() {
         Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
@@ -155,22 +162,21 @@ async fn alice(bus: Bus) {
             let mut update = channel.handle_update(msg).unwrap();
             print_user_interaction!("Alice accepts or rejects the update");
             if ALICE_ACCEPTS_UPDATE {
-                update.accept().unwrap()
+                update.accept().unwrap();
+                update.apply().unwrap();
+                // Receive ack from Watcher. If we don't get an ack immediately
+                // it is not a problem, the application/caller/user of the
+                // low-level API has to at some point make sure to get the
+                // message to the Watcher. In this example we always read it,
+                // otherwise the channel will return errors and stop the
+                // service.
+                bus.service_rx.recv().unwrap();
             } else {
                 update.reject();
-                println!("Alice done: Configured to not accept the channel update");
-                return;
             }
-            update.apply().unwrap();
         }
         _ => panic!("Unexpected Message or channel closure"),
     }
-    // Receive ack from Watcher. If we don't get an ack immediately it is not a
-    // problem, the application/caller/user of the low-level API has to at some
-    // point make sure to get the message to the Watcher. In this example we
-    // always read it, otherwise the channel will return errors and stop the
-    // service.
-    bus.service_rx.recv().unwrap();
 
     println!("\x1b[1mAlice: Current channel state\x1b[0m: {:#?}", channel);
 
@@ -202,6 +208,9 @@ async fn bob(bus: Bus) {
 
     if BOB_SIGNS {
         channel.sign().unwrap();
+    } else if !ALICE_SIGNS {
+        println!("Alice done: Nobody is configured to sign the proposal, thus both will timeout");
+        return;
     }
     match bus.rx.recv() {
         Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
@@ -235,17 +244,19 @@ async fn bob(bus: Bus) {
     new_state.outcome.balances.0[0].0[0] += 10.into();
     new_state.outcome.balances.0[0].0[1] -= 10.into();
     let mut update = channel.update(new_state).unwrap();
-    match bus.rx.recv() {
+    let accepted = match bus.rx.recv() {
         Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
             update.participant_accepted(0, msg).unwrap();
+            update.apply().unwrap();
+            true
         }
         Ok(ParticipantMessage::ChannelUpdateRejected { .. }) => {
             print_bold!("Bob: Aborting update, alice rejected");
+            false
         }
         Ok(_) => panic!("Unexpected message"),
         Err(_) => panic!("Bob done: Did not receive response from Alice"),
-    }
-    update.apply().unwrap();
+    };
 
     // This can be used to keep the watcher up to date in case the communication
     // channel is unreliable. You don't have to wait until receiving an
@@ -261,7 +272,13 @@ async fn bob(bus: Bus) {
     // we have to receive both. In a real application this would just update a
     // counter keeping track of the last acknowledged state. The counter is
     // currently not stored in the channel object.
-    bus.service_rx.recv().unwrap(); // Ack form update.apply()
+    if accepted {
+        // The channel/update only sends a message to the service if the version
+        // changes, which isn't the case if alice rejects. Again: In a normal
+        // application this would be called whenever we have an incomming
+        // message, not in such a scripted way as in this example.
+        bus.service_rx.recv().unwrap(); // Ack form update.apply()
+    }
     if BOB_SEND_ADDITIONAL_WATCHER_UPDATE {
         bus.service_rx.recv().unwrap(); // Ack from send_current_state_to_watcher()
     }
