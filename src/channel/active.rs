@@ -1,11 +1,11 @@
-use super::{channel_update::MissingSignatureError, fixed_size_payment, ChannelUpdate, PartID};
+use super::{fixed_size_payment, ChannelUpdate, PartID};
 use crate::{
     abiencode::{
         self,
         types::{Address, Hash, Signature},
     },
     sig,
-    wire::{MessageBus, ParticipantMessage},
+    wire::{MessageBus, ParticipantMessage, WatcherMessage},
     PerunClient,
 };
 
@@ -19,6 +19,12 @@ pub struct LedgerChannelUpdate {
     state: State,
     actor_idx: PartID,
     sig: Signature,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LedgerChannelWatchUpdate {
+    pub state: State,
+    pub signatures: [Signature; PARTICIPANTS],
 }
 
 #[derive(Debug)]
@@ -152,5 +158,12 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub(super) fn force_update(&mut self, new_state: State, signatures: [Signature; PARTICIPANTS]) {
         self.state = new_state;
         self.signatures = signatures;
+
+        self.client
+            .bus
+            .send_to_watcher(WatcherMessage::Update(LedgerChannelWatchUpdate {
+                state: self.state,
+                signatures: self.signatures,
+            }))
     }
 }

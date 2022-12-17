@@ -164,6 +164,12 @@ async fn alice(bus: Bus) {
         }
         _ => panic!("Unexpected Message or channel closure"),
     }
+    // Receive ack from Watcher. If we don't get an ack immediately it is not a
+    // problem, the application/caller/user of the low-level API has to at some
+    // point make sure to get the message to the Watcher. In this example we
+    // always read it, otherwise the channel will return errors and stop the
+    // service.
+    bus.service_rx.recv().unwrap();
 
     println!("\x1b[1mAlice: Current channel state\x1b[0m: {:#?}", channel);
 
@@ -239,6 +245,12 @@ async fn bob(bus: Bus) {
         Err(_) => panic!("Bob done: Did not receive response from Alice"),
     }
     update.apply().unwrap();
+    // Receive ack from Watcher. If we don't get an ack immediately it is not a
+    // problem, the application/caller/user of the low-level API has to at some
+    // point make sure to get the message to the Watcher. In this example we
+    // always read it, otherwise the channel will return errors and stop the
+    // service.
+    bus.service_rx.recv().unwrap();
 
     println!("\x1b[1mBob: Current channel state\x1b[0m: {:#?}", channel);
 
@@ -253,8 +265,17 @@ async fn service(
     loop {
         match rcv.recv() {
             Ok(ServiceMsg::Watcher(WatcherMessage::WatchRequest(msg))) => {
-                let res = WatcherMessage::WatchRequestAck {
+                let res = WatcherMessage::Ack {
                     id: msg.state.channel_id(),
+                    version: msg.state.version(),
+                };
+                println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
+                snd.send(ServiceMsg::Watcher(res)).unwrap();
+            }
+            Ok(ServiceMsg::Watcher(WatcherMessage::Update(msg))) => {
+                let res = WatcherMessage::Ack {
+                    id: msg.state.channel_id(),
+                    version: msg.state.version(),
                 };
                 println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
                 snd.send(ServiceMsg::Watcher(res)).unwrap();

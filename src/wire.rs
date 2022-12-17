@@ -5,6 +5,7 @@ use crate::{
     channel::{
         LedgerChannelFundingRequest, LedgerChannelProposal, LedgerChannelProposalAcc,
         LedgerChannelUpdate, LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
+        LedgerChannelWatchUpdate,
     },
 };
 
@@ -22,7 +23,8 @@ pub trait MessageBus: Debug {
 #[derive(Debug)]
 pub enum WatcherMessage {
     WatchRequest(LedgerChannelWatchRequest),
-    WatchRequestAck { id: Hash },
+    Update(LedgerChannelWatchUpdate),
+    Ack { id: Hash, version: u64 },
 }
 
 /// Messages sent to/from the Funder service.

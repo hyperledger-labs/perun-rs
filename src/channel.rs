@@ -6,7 +6,7 @@ mod proposal;
 mod signed;
 
 use crate::abiencode::types::{Address, Bytes32, U256};
-pub use active::LedgerChannelUpdate;
+pub use active::{LedgerChannelUpdate, LedgerChannelWatchUpdate};
 pub use agreed_upon::{
     LedgerChannelFundingRequest, LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
 };
