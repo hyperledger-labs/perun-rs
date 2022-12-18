@@ -37,6 +37,7 @@ pub struct LedgerChannelProposal {
 /// Message sent when a participant accepts the proposed channel.
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelProposalAcc {
+    proposal_id: Hash,
     nonce_share: NonceShare,
     participant: Address,
 }
@@ -44,6 +45,12 @@ pub struct LedgerChannelProposalAcc {
 /// Error returned when the proposal was already accepted by a participant.
 #[derive(Debug)]
 pub struct AlreadyAcceptedError;
+
+#[derive(Debug)]
+pub enum HandleAcceptError {
+    InvalidProposalID,
+    AlreadyAccepted,
+}
 
 /// Error returned when the transition from ProposedChannel -> AgreedUponChannel failed.
 #[derive(Debug)]
@@ -112,6 +119,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         }
 
         let acc: _ = LedgerChannelProposalAcc {
+            proposal_id: self.proposal.proposal_id,
             nonce_share,
             participant: address,
         };
@@ -144,10 +152,14 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         &mut self,
         part_id: PartID,
         msg: LedgerChannelProposalAcc,
-    ) -> Result<(), AlreadyAcceptedError> {
+    ) -> Result<(), HandleAcceptError> {
+        if msg.proposal_id != self.proposal.proposal_id {
+            return Err(HandleAcceptError::InvalidProposalID);
+        }
+
         let index = part_id - 1;
         match self.responses[index] {
-            Some(_) => Err(AlreadyAcceptedError),
+            Some(_) => Err(HandleAcceptError::AlreadyAccepted),
             None => {
                 self.responses[index] = Some(msg);
                 Ok(())
