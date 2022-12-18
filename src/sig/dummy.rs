@@ -15,11 +15,11 @@ pub struct Error {}
 pub struct Signer {}
 
 impl Signer {
-    pub fn sign_eth(&self, msg: Hash) -> Signature {
+    pub fn sign_eth(&self, _msg: Hash) -> Signature {
         unimplemented!()
     }
 
-    pub fn recover_signer(&self, hash: Hash, eth_sig: Signature) -> Result<Address, Error> {
+    pub fn recover_signer(&self, _hash: Hash, _eth_sig: Signature) -> Result<Address, Error> {
         unimplemented!()
     }
 }

@@ -14,11 +14,10 @@ rand = { version = "0.8.5", default-features = false, features = ["min_const_gen
 
 [dev-dependencies]
 tokio = { version = "1.23.0", features = ["full"] }
-rand = { features = ["getrandom"] }
 
 [features]
 default = ["std"]
-std = ["serde/std", "rand/std_rng"]
+std = ["serde/std", "rand/std", "rand/std_rng"]
 secp256k1 = ["dep:secp256k1", "std"]
 
 [[example]]

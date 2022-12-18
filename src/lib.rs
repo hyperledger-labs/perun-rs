@@ -5,7 +5,6 @@ mod abiencode {
     mod hashing;
     mod ser;
 
-    pub mod as_array;
     pub mod as_bytes;
     pub mod as_dyn_array;
     pub mod types;

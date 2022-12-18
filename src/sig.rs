@@ -1,6 +1,8 @@
 //! Handles the creation and verification of (Ethereum) Signatures.
 
+#[cfg(feature = "secp256k1")]
 use crate::abiencode::types::Hash;
+#[cfg(feature = "secp256k1")]
 use sha3::{Digest, Keccak256};
 
 #[cfg(feature = "secp256k1")]
@@ -16,6 +18,7 @@ pub use self::dummy::{Error, Signer};
 /// Add the `\x19Ethereum Signed Message\n<length>` prefix to hash.
 ///
 /// This is the format expected by the Solidity contracts.
+#[cfg(feature = "secp256k1")]
 fn hash_to_eth_signed_msg_hash(hash: Hash) -> Hash {
     // Packed encoding => We can't use the serializer
     let mut hasher = Keccak256::new();

@@ -122,7 +122,7 @@ mod tests {
         tests::serialize_and_compare,
         types::{Address, Hash},
     };
-    use uint::hex::{FromHex, ToHex};
+    use uint::hex::FromHex;
 
     /* Solidity: get_state_1A2P()
     ```solidity
@@ -229,6 +229,7 @@ mod tests {
     #[test]
     fn state_1a2p_sign() {
         use rand::{rngs::StdRng, SeedableRng};
+        use uint::hex::ToHex;
 
         use crate::sig::Signer;
 
