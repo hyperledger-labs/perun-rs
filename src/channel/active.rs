@@ -178,4 +178,21 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         new_state.is_final = true;
         self.update(new_state)
     }
+
+    // At the moment this just drops the channel after sending the message. In
+    // the future it might make sense to have a struct representing a closing
+    // channel, for example to allow resending the last message.
+    pub fn force_close(self) {
+        self.client
+            .bus
+            .send_to_watcher(WatcherMessage::StartDispute(LedgerChannelWatchUpdate {
+                state: self.state,
+                signatures: self.signatures,
+            }));
+    }
+
+    // At the moment this just drops the channel. In the future it might make
+    // sense to have a struct representing a closing channel, for example to
+    // allow resending the last message.
+    pub fn handle_dispute(self) {}
 }

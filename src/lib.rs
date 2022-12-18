@@ -23,4 +23,5 @@ pub mod channel;
 mod client;
 pub mod wire;
 
+pub use abiencode::types::Hash;
 pub use client::PerunClient;

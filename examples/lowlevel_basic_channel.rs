@@ -7,10 +7,10 @@ use perun::{
     },
     sig::Signer,
     wire::{FunderMessage, MessageBus, ParticipantMessage, WatcherMessage},
-    PerunClient,
+    Hash, PerunClient,
 };
 use std::{fmt::Debug, sync::mpsc};
-use tokio::{self, task::JoinHandle};
+use tokio;
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
 const ACCEPT_PROPOSAL: bool = true;
@@ -19,15 +19,23 @@ const ACCEPT_PROPOSAL: bool = true;
 const ALICE_SIGNS: bool = true; // True: Happy case
 const BOB_SIGNS: bool = true; // True: Happy case
 const ALICE_ACCEPTS_UPDATE: bool = true; // True: Happy case
-const BOB_SEND_ADDITIONAL_WATCHER_UPDATE: bool = true; // Optional
+const BOB_SEND_ADDITIONAL_WATCHER_UPDATE: bool = false; // Optional
 const ALICE_PROPOSE_NORMAL_CLOSE: bool = true; // True: Happy case
 const BOB_ACCEPTS_NORMAL_CLOSE: bool = true; // True: Happy case
+const ALICE_FORCE_CLOSE: bool = false; // Only relevant if the normal close fails or isn't started
 
 /// For simplicity of the communication channels, the Watcher and Funder are
 /// implemented in the same thread in this example.
 enum ServiceMsg {
     Watcher(WatcherMessage),
     Funder(FunderMessage),
+    /// Mock of the on-chain Dispute event (used for service->service
+    /// communication)
+    Dispute {
+        id: Hash,
+    },
+    /// Notification to the service to stop (only for this example)
+    Stop,
 }
 
 /// Message bus representing a tcp connection. For simplicity only using
@@ -111,7 +119,7 @@ async fn alice(bus: Bus) {
             channel.participant_accepted(1, msg).unwrap();
         }
         ParticipantMessage::ProposalRejected => {
-            println!("Alice done: Received ProposalRejected");
+            print_bold!("Alice done: Received ProposalRejected");
             return;
         }
         _ => panic!("Unexpected message"),
@@ -127,7 +135,9 @@ async fn alice(bus: Bus) {
     if ALICE_SIGNS {
         channel.sign().unwrap();
     } else if !BOB_SIGNS {
-        println!("Alice done: Nobody is configured to sign the proposal, thus both will timeout");
+        print_bold!(
+            "Alice done: Nobody is configured to sign the proposal, thus both will timeout"
+        );
         return;
     }
     match bus.rx.recv() {
@@ -137,9 +147,14 @@ async fn alice(bus: Bus) {
         Ok(_) => panic!("Unexpected message"),
         Err(_) => {
             // In reality some kind of timeout
-            println!("Alice done: Did not receive Signature from Bob");
+            print_bold!("Alice done: Did not receive Signature from Bob");
             return;
         }
+    }
+
+    if !ALICE_SIGNS {
+        print_bold!("Alice done: Configured to not sign the proposed channel");
+        return;
     }
 
     print_bold!("Alice: Received all signatures, send to watcher/funder");
@@ -186,18 +201,26 @@ async fn alice(bus: Bus) {
                 update.participant_accepted(1, msg).unwrap();
                 update.apply().unwrap();
                 bus.service_rx.recv().unwrap(); // Receive Ack from Watcher
+                print_bold!("Alice done: Channel closed normally and the Watcher has the data");
+                return;
             }
             Ok(ParticipantMessage::ChannelUpdateRejected { .. }) => {
                 print_bold!("Alice: Aborting normal close, bob rejected");
-
-                // TODO: Demonstrate force close
             }
             Ok(_) => panic!("Unexpected message"),
             Err(_) => panic!("Alice done: Did not receive response from Alice"),
         }
     }
 
-    println!("Alice done");
+    // Bob rejected the normal close
+    if ALICE_FORCE_CLOSE && !(ALICE_PROPOSE_NORMAL_CLOSE && BOB_ACCEPTS_NORMAL_CLOSE) {
+        print_user_interaction!("Alice starts dispute/force-close because Bob does not cooperate");
+        channel.force_close();
+        bus.service_rx.recv().unwrap(); // DisputeAck
+        print_bold!("Alice done: Received acknowledgement, so we can forget the channel now");
+        return;
+    }
+    print_bold!("Alice done");
 }
 
 /// Bob: Reacts to a proposed channel.
@@ -211,11 +234,11 @@ async fn bob(bus: Bus) {
         ParticipantMessage::ChannelProposal(prop) => client.handle_proposal(prop),
         _ => panic!("Unexpected message"),
     };
+    print_user_interaction!("Bob accepts or rejects the proposed channel");
     if ACCEPT_PROPOSAL {
-        print_user_interaction!("Bob accepts proposed channel");
         channel.accept(rand::random(), addr).unwrap();
     } else {
-        print_user_interaction!("Bob done: rejects proposed channel");
+        print_bold!("Bob done: rejects proposed channel");
         channel.reject();
         return;
     }
@@ -226,7 +249,7 @@ async fn bob(bus: Bus) {
     if BOB_SIGNS {
         channel.sign().unwrap();
     } else if !ALICE_SIGNS {
-        println!("Alice done: Nobody is configured to sign the proposal, thus both will timeout");
+        print_bold!("Bob done: Nobody is configured to sign the proposal, thus both will timeout");
         return;
     }
     match bus.rx.recv() {
@@ -236,9 +259,14 @@ async fn bob(bus: Bus) {
         Ok(_) => panic!("Unexpected message"),
         Err(_) => {
             // In reality some kind of timeout
-            println!("Bob done: Did not receive Signature from Alice");
+            print_bold!("Bob done: Did not receive Signature from Alice");
             return;
         }
+    }
+
+    if !BOB_SIGNS {
+        print_bold!("Bob done: Configured to not sign the proposed channel");
+        return;
     }
 
     print_bold!("Bob: Received all signatures, send to watcher/funder");
@@ -318,6 +346,8 @@ async fn bob(bus: Bus) {
                     update.accept().unwrap();
                     update.apply().unwrap();
                     bus.service_rx.recv().unwrap(); // Ack message for the new state.
+                    print_bold!("Bob done: Channel closed normally and the Watcher has the data");
+                    return;
                 } else {
                     update.reject();
                 }
@@ -327,13 +357,24 @@ async fn bob(bus: Bus) {
         }
     }
 
-    println!("Bob done");
+    if ALICE_FORCE_CLOSE && !(ALICE_PROPOSE_NORMAL_CLOSE && BOB_ACCEPTS_NORMAL_CLOSE) {
+        bus.service_rx.recv().unwrap(); // Receive Dispute Notification
+        channel.handle_dispute();
+        // In reality, Bob will have to ensure the Watcher has received the
+        // latest known state before calling handle_dispute (which drops the
+        // channel), this is excluded for brevity here.
+        print_bold!("Bob done: Received dispute notification, so we can forget the channel now");
+        return;
+    }
+
+    print_bold!("Bob done");
 }
 
 async fn service(
     participant: usize,
     snd: mpsc::Sender<ServiceMsg>,
     rcv: mpsc::Receiver<ServiceMsg>,
+    blockchain_snd: mpsc::Sender<ServiceMsg>,
 ) {
     loop {
         match rcv.recv() {
@@ -353,7 +394,27 @@ async fn service(
                 println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
                 snd.send(ServiceMsg::Watcher(res)).unwrap();
             }
+            Ok(ServiceMsg::Watcher(WatcherMessage::StartDispute(msg))) => {
+                let res = WatcherMessage::DisputeAck {
+                    id: msg.state.channel_id(),
+                };
+                println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
+                snd.send(ServiceMsg::Watcher(res)).unwrap();
+                // Send through mock blockchain to the participant's service.
+                blockchain_snd
+                    .send(ServiceMsg::Dispute {
+                        id: msg.state.channel_id(),
+                    })
+                    .unwrap();
+            }
             Ok(ServiceMsg::Watcher(_)) => panic!("Invalid Message"),
+            Ok(ServiceMsg::Dispute { id }) => {
+                // Message received from the mock blockchain, forward the info
+                // to the participant this service is responsible for.
+                let res = WatcherMessage::DisputeNotification { id };
+                println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
+                snd.send(ServiceMsg::Watcher(res)).unwrap();
+            }
             Ok(ServiceMsg::Funder(FunderMessage::FundingRequest(msg))) => {
                 let res = FunderMessage::Funded {
                     id: msg.state.channel_id(),
@@ -362,6 +423,9 @@ async fn service(
                 snd.send(ServiceMsg::Funder(res)).unwrap();
             }
             Ok(ServiceMsg::Funder(_)) => panic!("Invalid Message"),
+            Ok(ServiceMsg::Stop) => {
+                return;
+            }
             Err(_) => {
                 println!("Service done");
                 return;
@@ -370,41 +434,46 @@ async fn service(
     }
 }
 
-fn setup_participant(
-    participant: usize,
-    snd: mpsc::Sender<ParticipantMessage>,
-    rcv: mpsc::Receiver<ParticipantMessage>,
-) -> (Bus, JoinHandle<()>) {
-    let (participant_snd, participant_rcv) = mpsc::channel();
-    let (service_snd, service_rcv) = mpsc::channel();
-    let bus = Bus {
-        participant,
-        rx: rcv,
-        tx: snd,
-        service_tx: service_snd,
-        service_rx: participant_rcv,
-    };
-
-    let service_handle = tokio::spawn(service(participant, participant_snd, service_rcv));
-    (bus, service_handle)
-}
-
 /// Main example code: Set up communication channels and spawn each party in a
 /// tokio thread.
 #[tokio::main]
 async fn main() {
-    // Alice <-> Bob
-    let (alice_snd, alice_rcv) = mpsc::channel();
-    let (bob_snd, bob_rcv) = mpsc::channel();
+    // Communication channels
+    let to_bob = mpsc::channel();
+    let to_alice = mpsc::channel();
+    let to_sa = mpsc::channel();
+    let sa_to_alice = mpsc::channel();
+    let to_sb = mpsc::channel();
+    let sb_to_bob = mpsc::channel();
 
-    let (alice_bus, as_handle) = setup_participant(0, alice_snd, bob_rcv);
-    let a_handle = tokio::spawn(alice(alice_bus));
+    // Alice
+    let sa_handle = tokio::spawn(service(0, sa_to_alice.0, to_sa.1, to_sb.0.clone()));
+    let bus = Bus {
+        participant: 0,
+        rx: to_alice.1,
+        tx: to_bob.0,
+        service_tx: to_sa.0.clone(),
+        service_rx: sa_to_alice.1,
+    };
+    let a_handle = tokio::spawn(alice(bus));
 
-    let (bob_bus, bs_handle) = setup_participant(1, bob_snd, alice_rcv);
-    let b_handle = tokio::spawn(bob(bob_bus));
+    // Bob
+    let sb_handle = tokio::spawn(service(1, sb_to_bob.0, to_sb.1, to_sa.0.clone()));
+    let bus = Bus {
+        participant: 1,
+        rx: to_bob.1,
+        tx: to_alice.0,
+        service_tx: to_sb.0.clone(),
+        service_rx: sb_to_bob.1,
+    };
+    let b_handle = tokio::spawn(bob(bus));
 
     a_handle.await.unwrap();
     b_handle.await.unwrap();
-    as_handle.await.unwrap();
-    bs_handle.await.unwrap();
+
+    to_sa.0.send(ServiceMsg::Stop).unwrap();
+    to_sb.0.send(ServiceMsg::Stop).unwrap();
+
+    sa_handle.await.unwrap();
+    sb_handle.await.unwrap();
 }
