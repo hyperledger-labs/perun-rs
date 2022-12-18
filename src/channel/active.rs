@@ -86,16 +86,8 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         self.state.channel_id()
     }
 
-    pub fn state(&self) -> &State {
-        // TODO: Check if we need it or if the Copy is sufficient (it should)
-        //
-        // Return an immutable reference to the state. In Go or C this would
-        // allow the caller to modify the internal state of the channel due to
-        // the lack of distinction between mutable and immutable references (it
-        // is a pointer). Therefore we don't have to clone (or force a copy)
-        // upon the caller in Rust, which would probably be the ideal way to do
-        // it in Go.
-        &self.state
+    pub fn state(&self) -> State {
+        self.state
     }
 
     pub fn part_id(&self) -> PartID {
@@ -135,9 +127,6 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         &'ch mut self,
         msg: LedgerChannelUpdate,
     ) -> Result<ChannelUpdate<'ch, 'cl, B>, HandleUpdateError> {
-        // TODO: How to handle/prevent the case that this channel is already
-        // closed? New channel type/dropped channel/runtime error?
-
         if msg.state.channel_id() != self.state.channel_id() {
             return Err(HandleUpdateError::InvalidChannelID);
         }

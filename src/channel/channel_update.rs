@@ -59,7 +59,7 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
                 let sig = self.channel.client().signer.sign_eth(hash);
 
                 let acc: _ = LedgerChannelUpdateAccepted {
-                    channel: self.channel.channel_id(), // TODO: ProposalID, not channelID!
+                    channel: self.channel.channel_id(),
                     version: self.new_state.version(),
                     sig: sig,
                 };
@@ -75,7 +75,7 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
     pub fn reject(self) {
         self.channel.client().bus.send_to_participants(
             crate::wire::ParticipantMessage::ChannelUpdateRejected {
-                id: self.channel.channel_id(), // TODO: ProposalID, not channelID!
+                id: self.channel.channel_id(),
             },
         );
     }
@@ -85,7 +85,6 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
         part_id: PartID,
         msg: LedgerChannelUpdateAccepted,
     ) -> Result<(), AddSignatureError> {
-        // TODO: ProposalID, not channelID!
         if msg.channel != self.channel.channel_id() {
             return Err(AddSignatureError::InvalidChannelID);
         }

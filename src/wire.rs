@@ -61,5 +61,5 @@ pub enum ParticipantMessage {
     ProposalRejected,
     ChannelUpdate(LedgerChannelUpdate),
     ChannelUpdateAccepted(LedgerChannelUpdateAccepted),
-    ChannelUpdateRejected { id: Hash }, // TODO: This is a proposal ID, not the channel ID!
+    ChannelUpdateRejected { id: Hash },
 }

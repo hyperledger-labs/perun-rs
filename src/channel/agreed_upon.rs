@@ -31,7 +31,7 @@ pub struct LedgerChannelFundingRequest {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelUpdateAccepted {
-    pub channel: Hash, // TODO: ProposalID, not channelID!???
+    pub channel: Hash,
     pub version: u64,
     pub sig: Signature,
 }
