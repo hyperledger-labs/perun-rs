@@ -43,6 +43,12 @@ macro_rules! bytesN {
             }
         }
 
+        impl Default for $T {
+            fn default() -> Self {
+                Self([0; $N])
+            }
+        }
+
         impl_hex_debug!($T);
     };
 }
@@ -130,7 +136,7 @@ impl Distribution<U256> for Standard {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub struct Address(pub [u8; 20]);
 impl_hex_debug!(Address);
 

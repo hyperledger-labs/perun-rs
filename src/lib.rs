@@ -5,7 +5,6 @@ mod abiencode {
     mod hashing;
     mod ser;
 
-    pub mod as_array;
     pub mod as_bytes;
     pub mod as_dyn_array;
     pub mod types;
@@ -17,3 +16,11 @@ mod abiencode {
     #[cfg(test)]
     pub mod tests;
 }
+pub mod sig;
+
+pub mod channel;
+mod client;
+pub mod wire;
+
+pub use abiencode::types::Hash;
+pub use client::PerunClient;

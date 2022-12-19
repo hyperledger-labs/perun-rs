@@ -10,9 +10,16 @@ serde = { version = "1.0.147", default-features = false, features = ["derive"] }
 sha3 = { version = "0.10.6", default-features = false }
 uint = { version = "0.9.5", default-features = false }
 secp256k1 = { version = "0.24.1", default-features = false, features = ["rand", "alloc", "recovery"], optional = true}
-rand = { version = "0.8.5", default-features = false, features = ["std_rng", "min_const_gen"] }
+rand = { version = "0.8.5", default-features = false, features = ["min_const_gen"] }
+
+[dev-dependencies]
+tokio = { version = "1.23.0", features = ["full"] }
 
 [features]
 default = ["std"]
-std = ["serde/std"]
-secp256k1 = ["dep:secp256k1"]
+std = ["serde/std", "rand/std", "rand/std_rng"]
+secp256k1 = ["dep:secp256k1", "std"]
+
+[[example]]
+name = "lowlevel_basic_channel"
+required-features = ["secp256k1"]

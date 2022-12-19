@@ -169,6 +169,3 @@ mod dynamic {
         run(d);
     }
 }
-
-// TODO: dyn_in_fixedarray (ExampleE?)
-// TODO: dyn_in_dynarray
