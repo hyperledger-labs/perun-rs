@@ -1,14 +1,19 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+#![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod abiencode {
+    mod error;
+    mod hashing;
+    mod ser;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    pub mod as_array;
+    pub mod as_bytes;
+    pub mod as_dyn_array;
+    pub mod types;
+
+    pub use error::{Error, Result};
+    pub use hashing::to_hash;
+    pub use ser::{to_writer, Serializer, Writer};
+
+    #[cfg(test)]
+    pub mod tests;
 }
