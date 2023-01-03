@@ -24,3 +24,7 @@ pub mod wire;
 
 pub use abiencode::types::Hash;
 pub use client::PerunClient;
+
+mod perunwire {
+    include!(concat!(env!("OUT_DIR"), "/perunwire.rs"));
+}
