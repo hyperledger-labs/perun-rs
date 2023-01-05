@@ -6,7 +6,7 @@ use perun::{
     perunwire::{envelope, Envelope},
     sig::Signer,
     wire::{BytesBus, ProtoBufEncodingLayer},
-    PerunClient,
+    Address, PerunClient,
 };
 use prost::Message;
 use std::{
@@ -87,6 +87,14 @@ macro_rules! print_user_interaction {
 }
 
 fn main() {
+    // Some information about the (temporary) blockchain we need, could be hard
+    // coded into the application or received by some other means.
+    let mut config_stream = TcpStream::connect("127.0.0.1:1338").unwrap();
+    let mut eth_holder = [0u8; 20];
+    config_stream.read_exact(&mut eth_holder).unwrap();
+    let eth_holder = Address(eth_holder);
+    drop(config_stream);
+
     // Networking
     let stream = TcpStream::connect("127.0.0.1:1337").unwrap();
     let stream = RefCell::new(stream);
@@ -111,8 +119,8 @@ fn main() {
         nonce_share: rand::random(),
         init_bals: Allocation::new(
             [Asset {
-                chain_id: 1.into(),
-                holder: rand::random(),
+                chain_id: 1337.into(), // Default chainID when using a SimulatedBackend from go-ethereum
+                holder: eth_holder,
             }],
             init_balance,
         ),

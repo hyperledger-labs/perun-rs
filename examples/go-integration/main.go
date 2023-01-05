@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"math/big"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,9 +14,9 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	ethchannel "github.com/perun-network/perun-eth-backend/channel"
+	ethwallet "github.com/perun-network/perun-eth-backend/wallet"
 	phd "github.com/perun-network/perun-eth-backend/wallet/hd"
 	"github.com/sirupsen/logrus"
 	"perun.network/go-perun/channel"
@@ -52,14 +53,13 @@ func main() {
 	w := NewSimpleWallet()
 	account := w.GenerateNewAccount()
 	deployer_account := w.GenerateNewAccount()
+	funder_account := w.GenerateNewAccount()
 
 	// Setup the simulated backend + wrappers around them
-	sk, _ := crypto.GenerateKey()
-	addr := crypto.PubkeyToAddress(sk.PublicKey)
 	sb := backends.NewSimulatedBackend(
 		core.GenesisAlloc{
-			addr:                     {Balance: ToWei(1_000_000, "ether")},
 			deployer_account.Address: {Balance: ToWei(1_000_000, "ether")},
+			funder_account.Address:   {Balance: ToWei(1_000_000, "ether")},
 		},
 		30_000_000,
 	)
@@ -74,7 +74,7 @@ func main() {
 	go func() {
 		for {
 			sb.Commit()
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond)
 		}
 	}()
 
@@ -83,13 +83,23 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	_, err = ethchannel.DeployETHAssetholder(context.Background(), cb, adjAddr, deployer_account)
+	eth_holder, err := ethchannel.DeployETHAssetholder(context.Background(), cb, adjAddr, deployer_account)
 	if err != nil {
 		panic(err)
 	}
 
 	// Setup dependency injection objects
 	funder := ethchannel.NewFunder(cb)
+	funder.RegisterAsset(
+		ethchannel.Asset{
+			ChainID: ethchannel.ChainID{
+				Int: chain_id,
+			},
+			AssetHolder: ethwallet.Address(eth_holder),
+		},
+		ethchannel.NewETHDepositor(),
+		funder_account,
+	)
 	adjudicator := ethchannel.NewAdjudicator(
 		cb,
 		adjAddr,
@@ -131,6 +141,28 @@ func main() {
 
 	go c.Handle(proposalHandler, updateHandler)
 	go bus.Listen(listener)
+
+	go func() {
+		// Listen for any connection attempt on port 1338 and send out some
+		// information like the ETH holder address. (needed for this example,
+		// we're assuming the application already knows these values (for now
+		// at least))
+		l, err := net.Listen("tcp", "127.0.0.1:1338")
+		if err != nil {
+			panic(err)
+		}
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				panic(err)
+			}
+
+			_, err = conn.Write(eth_holder.Bytes())
+			if err != nil {
+				panic(err)
+			}
+		}
+	}()
 
 	// Wait for Ctrl+C
 	println("Press Ctrl+C to stop")
