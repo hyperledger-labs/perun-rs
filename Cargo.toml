@@ -27,3 +27,7 @@ secp256k1 = ["dep:secp256k1", "std"]
 [[example]]
 name = "lowlevel_basic_channel"
 required-features = ["secp256k1"]
+
+[[example]]
+name = "go-integration"
+required-features = ["secp256k1"]

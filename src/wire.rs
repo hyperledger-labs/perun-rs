@@ -1,4 +1,8 @@
+mod encoding;
+
 use core::fmt::Debug;
+
+pub use encoding::ProtoBufEncodingLayer;
 
 use crate::{
     abiencode::types::Hash,
@@ -8,6 +12,12 @@ use crate::{
         LedgerChannelWatchUpdate,
     },
 };
+
+pub trait BytesBus: Debug {
+    fn send_to_watcher(&self, msg: &[u8]);
+    fn send_to_funder(&self, msg: &[u8]);
+    fn send_to_participants(&self, msg: &[u8]);
+}
 
 /// Low-Level abstraction over the network configuration.
 ///
@@ -56,6 +66,7 @@ pub enum FunderMessage {
 /// Messages sent between participants of a channel.
 #[derive(Debug)]
 pub enum ParticipantMessage {
+    Auth,
     ChannelProposal(LedgerChannelProposal),
     ProposalAccepted(LedgerChannelProposalAcc),
     ProposalRejected,

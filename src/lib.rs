@@ -25,6 +25,8 @@ pub mod wire;
 pub use abiencode::types::Hash;
 pub use client::PerunClient;
 
-mod perunwire {
+// TODO: This probably shouldn't be public, but the example currently needs it,
+// since the encoding layer doesn't do decoding, yet.
+pub mod perunwire {
     include!(concat!(env!("OUT_DIR"), "/perunwire.rs"));
 }

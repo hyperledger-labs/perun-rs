@@ -26,6 +26,10 @@ impl<B: MessageBus> PerunClient<B> {
         PerunClient { bus, signer }
     }
 
+    pub fn send_handshake_msg(&self) {
+        self.bus.send_to_participants(ParticipantMessage::Auth);
+    }
+
     /// Propose a new channel with the given parameters/proposal and send a
     /// message to all participants.
     pub fn propose_channel(&self, prop: LedgerChannelProposal) -> ProposedChannel<B> {
