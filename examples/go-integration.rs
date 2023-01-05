@@ -3,7 +3,7 @@ use perun::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
         Asset, LedgerChannelProposal,
     },
-    perunwire::Envelope,
+    perunwire::{envelope, Envelope},
     sig::Signer,
     wire::{BytesBus, ProtoBufEncodingLayer},
     PerunClient,
@@ -121,23 +121,21 @@ fn main() {
     };
     // Propose new channel and wait for responses
     let mut channel = client.propose_channel(prop);
-    bus.recv_envelope();
-    // match bus.rx.recv().unwrap() {
-    //     ParticipantMessage::ProposalAccepted(msg) => {
-    //         channel.participant_accepted(1, msg).unwrap();
-    //     }
-    //     ParticipantMessage::ProposalRejected => {
-    //         print_bold!("Alice done: Received ProposalRejected");
-    //         return;
-    //     }
-    //     _ => panic!("Unexpected message"),
-    // }
-
-    // print_bold!(
-    //     "Both agreed on proposal and nonces, Both sign the initial state and exchange signatures"
-    // );
-
-    // std::thread::sleep(std::time::Duration::from_millis(1000 * 60));
+    let envelope = bus.recv_envelope();
+    match envelope.msg {
+        Some(envelope::Msg::LedgerChannelProposalAccMsg(msg)) => channel
+            .participant_accepted(1, msg.try_into().unwrap())
+            .unwrap(),
+        Some(envelope::Msg::ChannelProposalRejMsg(_)) => {
+            print_bold!("Alice done: Received ProposalRejected");
+            return;
+        }
+        Some(_) => panic!("Unexpected message"),
+        None => panic!("Envelope did not contain a msg"),
+    }
+    print_bold!(
+        "Both agreed on proposal and nonces, Both sign the initial state and exchange signatures"
+    );
 
     print_bold!("Alice done");
 }
