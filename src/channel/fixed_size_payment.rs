@@ -30,8 +30,7 @@ pub struct Params<const P: usize> {
     pub nonce: U256,
     #[serde(with = "as_dyn_array")]
     pub participants: [Address; P],
-    #[serde(with = "as_bytes")]
-    pub app: [u8; 0],
+    pub app: Address,
     pub ledger_channel: bool,
     pub virtual_channel: bool,
 }

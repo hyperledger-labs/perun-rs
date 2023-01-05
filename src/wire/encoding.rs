@@ -26,7 +26,9 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
             ParticipantMessage::ProposalAccepted(_) => todo!(),
             ParticipantMessage::ProposalRejected => todo!(),
             ParticipantMessage::ChannelUpdate(_) => todo!(),
-            ParticipantMessage::ChannelUpdateAccepted(_) => todo!(),
+            ParticipantMessage::ChannelUpdateAccepted(msg) => {
+                envelope::Msg::ChannelUpdateAccMsg(msg.into())
+            }
             ParticipantMessage::ChannelUpdateRejected { .. } => todo!(),
         };
 

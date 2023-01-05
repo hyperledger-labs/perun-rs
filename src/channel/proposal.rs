@@ -280,6 +280,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         // Go-Perun does NOT use keccak256 here, probably to be less dependent
         // on Ethereum. We do the same here.
         let mut hasher = Sha3_256::new();
+        hasher.update(self.proposal.nonce_share.0);
 
         // Go through all responses and make sure none is missing. Additionally
         // collect information needed later.
@@ -311,7 +312,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             challenge_duration: self.proposal.challenge_duration,
             nonce: nonce,
             participants,
-            app: [],
+            app: Address([0u8; 20]),
             ledger_channel: true,
             virtual_channel: false,
         };

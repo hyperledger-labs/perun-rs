@@ -121,8 +121,7 @@ fn main() {
     };
     // Propose new channel and wait for responses
     let mut channel = client.propose_channel(prop);
-    let envelope = bus.recv_envelope();
-    match envelope.msg {
+    match bus.recv_envelope().msg {
         Some(envelope::Msg::LedgerChannelProposalAccMsg(msg)) => channel
             .participant_accepted(1, msg.try_into().unwrap())
             .unwrap(),
@@ -136,6 +135,23 @@ fn main() {
     print_bold!(
         "Both agreed on proposal and nonces, Both sign the initial state and exchange signatures"
     );
+
+    // Go to Phase 2: Signing the initial state
+    let mut channel = channel.build().unwrap();
+    channel.sign().unwrap();
+    match bus.recv_envelope().msg {
+        Some(envelope::Msg::ChannelUpdateAccMsg(msg)) => {
+            channel.add_signature(msg.try_into().unwrap()).unwrap()
+        }
+        Some(envelope::Msg::ChannelUpdateRejMsg(_)) => {
+            print_bold!("Alice done: Did not receive Signature from Bob");
+            return;
+        }
+        Some(_) => panic!("Unexpected message"),
+        None => panic!("Envelope did not contain a msg"),
+    }
+
+    print_bold!("Alice: Received all signatures, send to watcher/funder");
 
     print_bold!("Alice done");
 }
