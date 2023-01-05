@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"math/big"
 	"os"
 	"os/signal"
@@ -16,10 +17,12 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	ethchannel "github.com/perun-network/perun-eth-backend/channel"
 	phd "github.com/perun-network/perun-eth-backend/wallet/hd"
+	"github.com/sirupsen/logrus"
 	"perun.network/go-perun/channel"
 	"perun.network/go-perun/client"
+	perunlogrus "perun.network/go-perun/log/logrus"
+	"perun.network/go-perun/wallet"
 	"perun.network/go-perun/watcher/local"
-	"perun.network/go-perun/wire"
 	wirenet "perun.network/go-perun/wire/net"
 	"perun.network/go-perun/wire/net/simple"
 	"perun.network/go-perun/wire/protobuf"
@@ -44,6 +47,8 @@ func ToWei(value int64, denomination string) *big.Int {
 }
 
 func main() {
+	perunlogrus.Set(logrus.TraceLevel, &logrus.TextFormatter{})
+
 	w := NewSimpleWallet()
 	account := w.GenerateNewAccount()
 	deployer_account := w.GenerateNewAccount()
@@ -91,9 +96,9 @@ func main() {
 		account.Address,
 		account,
 	)
-	perunID := wire.NewAddress()
+	perunID := simple.NewAddress("Bob")
 	bus := wirenet.NewBus(
-		simple.NewAccount(simple.NewAddress("Bob")),
+		simple.NewAccount(perunID),
 		simple.NewTCPDialer(time.Minute),
 		protobuf.Serializer(),
 	)
@@ -110,8 +115,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	var proposalHandler client.ProposalHandler = ProposalHandler{}
+	bob_account, err := wallet.NewAccount()
+	if err != nil {
+		panic(err)
+	}
+	var proposalHandler client.ProposalHandler = ProposalHandler{
+		addr: bob_account.Address(),
+	}
 	var updateHandler client.UpdateHandler = UpdateHandler{}
 
 	listener, err := simple.NewTCPListener("127.0.0.1:1337")
@@ -133,11 +143,30 @@ func main() {
 	println("Done")
 }
 
-type ProposalHandler struct{}
+type ProposalHandler struct {
+	addr wallet.Address
+}
 
 // HandleProposal implements client.ProposalHandler
-func (ProposalHandler) HandleProposal(proposal client.ChannelProposal, res *client.ProposalResponder) {
+func (ph ProposalHandler) HandleProposal(proposal client.ChannelProposal, res *client.ProposalResponder) {
 	println("HandleProposal(): ", proposal, res)
+
+	var nonce_share [32]byte
+	_, err := rand.Read(nonce_share[:])
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = res.Accept(context.Background(), &client.LedgerChannelProposalAccMsg{
+		BaseChannelProposalAcc: client.BaseChannelProposalAcc{
+			ProposalID: proposal.Base().ProposalID,
+			NonceShare: nonce_share,
+		},
+		Participant: ph.addr,
+	})
+	if err != nil {
+		panic(err)
+	}
 }
 
 type UpdateHandler struct{}

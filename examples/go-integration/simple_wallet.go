@@ -23,6 +23,7 @@ func NewSimpleWallet() *SimpleWallet {
 type SimpleWallet struct {
 	accounts []accounts.Account
 	keys     map[common.Address]*ecdsa.PrivateKey
+	derived  map[string]accounts.Account
 }
 
 var _ accounts.Wallet = (*SimpleWallet)(nil)
@@ -60,8 +61,12 @@ func (w *SimpleWallet) Contains(account accounts.Account) bool {
 }
 
 // Derive implements accounts.Wallet
-func (*SimpleWallet) Derive(path accounts.DerivationPath, pin bool) (accounts.Account, error) {
-	panic("unimplemented")
+func (w *SimpleWallet) Derive(path accounts.DerivationPath, pin bool) (accounts.Account, error) {
+	acc, ok := w.derived[path.String()]
+	if !ok {
+		acc = w.GenerateNewAccount()
+	}
+	return acc, nil
 }
 
 // Open implements accounts.Wallet

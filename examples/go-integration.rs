@@ -120,8 +120,8 @@ fn main() {
         participant: addr,
     };
     // Propose new channel and wait for responses
-    // let mut channel = client.propose_channel(prop);
-    // bus.recv_envelope();
+    let mut channel = client.propose_channel(prop);
+    bus.recv_envelope();
     // match bus.rx.recv().unwrap() {
     //     ParticipantMessage::ProposalAccepted(msg) => {
     //         channel.participant_accepted(1, msg).unwrap();

@@ -192,19 +192,21 @@ impl<const A: usize, const P: usize> From<Allocation<A, P>> for perunwire::Alloc
             assets: value
                 .assets
                 .map(|a| {
-                    // go-perun currently uses `encoding/binary` in go and
-                    // manually adds the length of each field.
                     let mut b = vec![];
-                    b.append(&mut 20u16.to_le_bytes().to_vec()); // Length of asset holder (address)
-                    b.append(&mut a.holder.0.to_vec());
+
                     // go-perun uses less bytes, as it strips away some leading
                     // zeroes, which this implementation does not (for
                     // simplicity). However this should still be understandable
                     // by go-perun.
-                    b.append(&mut 32u16.to_le_bytes().to_vec());
+                    b.extend_from_slice(&32u16.to_le_bytes());
                     let mut buf = [0u8; 32];
                     a.chain_id.to_big_endian(&mut buf);
                     b.extend_from_slice(&buf);
+
+                    // go-perun currently uses `encoding/binary` in go and
+                    // manually adds the length of each field.
+                    b.extend_from_slice(&20u16.to_le_bytes()); // Length of asset holder (address)
+                    b.extend_from_slice(&a.holder.0);
 
                     b
                 })

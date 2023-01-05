@@ -93,7 +93,7 @@ impl From<LedgerChannelProposal> for perunwire::LedgerChannelProposalMsg {
                 funding_agreement: Some(value.funding_agreement.into()),
             }),
             participant: value.participant.0.to_vec(),
-            peers: vec![], // TODO: This is not empty!
+            peers: vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()], // TODO: Use real data
         }
     }
 }
