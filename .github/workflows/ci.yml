@@ -13,7 +13,14 @@ jobs:
     name: Tests
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - name: Install protobuf
+        shell: bash
+        run: |
+            sudo apt-get install protobuf-compiler
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          submodules: true
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
       - name: Cargo fmt
