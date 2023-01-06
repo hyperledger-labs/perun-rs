@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/ethereum/go-ethereum v1.10.26
-	github.com/perun-network/perun-eth-backend v0.1.0
+	github.com/perun-network/perun-eth-backend v0.1.1-0.20230106102129-5bbe33a7cb89
 	perun.network/go-perun v0.10.6
 )
 
