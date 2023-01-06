@@ -74,7 +74,7 @@ func main() {
 	go func() {
 		for {
 			sb.Commit()
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 	}()
 

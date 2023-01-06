@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+import "wire.proto";
+
+package perunremote;
+
+message FundingRequestMsg {
+    uint32 participant = 1;
+    perunwire.Params params = 2;
+    perunwire.State initial_state = 3;
+    perunwire.Balances funding_agreement = 4;
+}
+
+message FundingResponseMsg {
+    bytes channel_id = 1;
+    bool success = 2;
+}
+
+message WatchRequestMsg {
+    uint32 participant = 1;
+    perunwire.SignedState state = 2;
+}
+
+message WatchUpdateMsg {
+    perunwire.State initial_state = 1;
+    repeated bytes sigs = 2;
+}
+
+message WatchResponseMsg {
+    bytes channel_id = 1;
+    uint64 version = 2;
+    bool success = 3;
+}
+
+message ForceCloseRequestMsg {
+    bytes channel_id = 1;
+    optional WatchUpdateMsg latest = 2;
+}
+
+message ForceCloseResponseMsg {
+    bytes channel_id = 1;
+    bool success = 3;
+}
+
+message DisputeNotification {
+    bytes channel_id = 1;
+}
