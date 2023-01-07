@@ -22,5 +22,11 @@ pub mod channel;
 mod client;
 pub mod wire;
 
-pub use abiencode::types::Hash;
+pub use abiencode::types::{Address, Hash};
 pub use client::PerunClient;
+
+// TODO: This probably shouldn't be public, but the example currently needs it,
+// since the encoding layer doesn't do decoding, yet.
+pub mod perunwire {
+    include!(concat!(env!("OUT_DIR"), "/perunwire.rs"));
+}

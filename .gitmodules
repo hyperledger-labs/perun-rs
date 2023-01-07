@@ -1,0 +1,3 @@
+[submodule "go-perun"]
+	path = go-perun
+	url = https://github.com/hyperledger-labs/go-perun

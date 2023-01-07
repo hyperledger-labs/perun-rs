@@ -5,11 +5,22 @@
 //! known at compile time or we don't have heap allocation.
 
 use super::Asset;
-use crate::abiencode::{
-    self, as_bytes, as_dyn_array,
-    types::{Address, Hash, U256},
+use crate::{
+    abiencode::{
+        self, as_bytes, as_dyn_array,
+        types::{Address, Hash, U256},
+    },
+    perunwire,
 };
 use serde::Serialize;
+
+#[derive(Debug)]
+pub enum ConversionError {
+    ParticipantSizeMissmatch,
+    AssetSizeMissmatch,
+    ByteLengthMissmatch,
+    ExptectedSome,
+}
 
 /// Parameters for this channel, exchanged during channel proposal and sent
 /// on-chain during a dispute.
@@ -19,8 +30,7 @@ pub struct Params<const P: usize> {
     pub nonce: U256,
     #[serde(with = "as_dyn_array")]
     pub participants: [Address; P],
-    #[serde(with = "as_bytes")]
-    pub app: [u8; 0],
+    pub app: Address,
     pub ledger_channel: bool,
     pub virtual_channel: bool,
 }
@@ -84,6 +94,38 @@ pub struct Balances<const A: usize, const P: usize>(
     #[serde(with = "as_dyn_array")] pub [ParticipantBalances<P>; A],
 );
 
+impl<const A: usize, const P: usize> Default for Balances<A, P> {
+    fn default() -> Self {
+        Self([ParticipantBalances::default(); A])
+    }
+}
+
+impl<const A: usize, const P: usize> TryFrom<perunwire::Balances> for Balances<A, P> {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::Balances) -> Result<Self, Self::Error> {
+        if value.balances.len() != A {
+            Err(ConversionError::AssetSizeMissmatch)
+        } else {
+            // let mut balances: Balances<A, P> = ParticipantBalances([])
+            let mut balances = Self::default();
+            for (a, b) in balances.0.iter_mut().zip(value.balances) {
+                *a = b.try_into()?;
+            }
+
+            Ok(balances)
+        }
+    }
+}
+
+impl<const A: usize, const P: usize> From<Balances<A, P>> for perunwire::Balances {
+    fn from(value: Balances<A, P>) -> Self {
+        perunwire::Balances {
+            balances: value.0.map(|x| x.into()).to_vec(),
+        }
+    }
+}
+
 /// Stores which participant has how much of each asset.
 #[derive(Serialize, Debug, Copy, Clone)]
 pub struct Allocation<const A: usize, const P: usize> {
@@ -92,6 +134,86 @@ pub struct Allocation<const A: usize, const P: usize> {
     pub balances: Balances<A, P>,
     #[serde(with = "as_dyn_array")]
     locked: [(); 0], // Only needed for encoding
+}
+
+impl<const A: usize, const P: usize> TryFrom<perunwire::Allocation> for Allocation<A, P> {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::Allocation) -> Result<Self, Self::Error> {
+        let mut assets = [Asset::default(); A];
+        for (a, b) in assets.iter_mut().zip(value.assets) {
+            if b.len() < 2 + 20 + 2 {
+                // We have to at least store two lengths (2 bytes each), the first of which has
+                // to be 20 bytes.
+                return Err(ConversionError::ByteLengthMissmatch);
+            }
+            // holder
+            let holder_length = u16::from_le_bytes(b[..2].try_into().unwrap());
+            if holder_length != 20u16 {
+                return Err(ConversionError::ByteLengthMissmatch);
+            }
+            let b: &[u8] = &b[2..];
+            let mut holder = Address::default();
+            holder.0.copy_from_slice(&b[..20]);
+            let b = &b[20..];
+            // chainid
+            let chain_id_length = u16::from_le_bytes(b[..2].try_into().unwrap());
+            if chain_id_length > 32u16 || b.len() != chain_id_length as usize {
+                // if it is larger than 32 bytes we cannot represent it in this
+                // type, and a larger value (while representable in Go) doesn't
+                // make sense in this context. Additionally, the buffer b has to
+                // have this amount of bytes remaining, which is not checked in
+                // the first condition.
+                return Err(ConversionError::ByteLengthMissmatch);
+            }
+            // We can only use from_big_endian if we have 32 bytes
+            let mut buffer = [0u8; 32];
+            buffer[(32 - chain_id_length as usize)..].copy_from_slice(b);
+            let chain_id = U256::from_big_endian(&buffer);
+
+            *a = Asset { chain_id, holder }
+        }
+
+        Ok(Self {
+            assets,
+            balances: value
+                .balances
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            locked: [],
+        })
+    }
+}
+
+impl<const A: usize, const P: usize> From<Allocation<A, P>> for perunwire::Allocation {
+    fn from(value: Allocation<A, P>) -> Self {
+        perunwire::Allocation {
+            assets: value
+                .assets
+                .map(|a| {
+                    let mut b = vec![];
+
+                    // go-perun uses less bytes, as it strips away some leading
+                    // zeroes, which this implementation does not (for
+                    // simplicity). However this should still be understandable
+                    // by go-perun.
+                    b.extend_from_slice(&32u16.to_le_bytes());
+                    let mut buf = [0u8; 32];
+                    a.chain_id.to_big_endian(&mut buf);
+                    b.extend_from_slice(&buf);
+
+                    // go-perun currently uses `encoding/binary` in go and
+                    // manually adds the length of each field.
+                    b.extend_from_slice(&20u16.to_le_bytes()); // Length of asset holder (address)
+                    b.extend_from_slice(&a.holder.0);
+
+                    b
+                })
+                .to_vec(),
+            balances: Some(value.balances.into()),
+            locked: vec![],
+        }
+    }
 }
 
 impl<const A: usize, const P: usize> Allocation<A, P> {
@@ -113,6 +235,43 @@ impl<const A: usize, const P: usize> Allocation<A, P> {
 #[derive(Serialize, Debug, Copy, Clone)]
 #[serde(transparent)]
 pub struct ParticipantBalances<const P: usize>(#[serde(with = "as_dyn_array")] pub [U256; P]);
+
+impl<const P: usize> Default for ParticipantBalances<P> {
+    fn default() -> Self {
+        Self([U256::default(); P])
+    }
+}
+
+impl<const P: usize> TryFrom<perunwire::Balance> for ParticipantBalances<P> {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::Balance) -> Result<Self, Self::Error> {
+        if value.balance.len() != P {
+            Err(ConversionError::ParticipantSizeMissmatch)
+        } else {
+            let mut balances = Self::default();
+            for (a, b) in balances.0.iter_mut().zip(value.balance) {
+                *a = U256::from_big_endian(&b)
+            }
+            Ok(balances)
+        }
+    }
+}
+
+impl<const P: usize> From<ParticipantBalances<P>> for perunwire::Balance {
+    fn from(value: ParticipantBalances<P>) -> Self {
+        perunwire::Balance {
+            balance: value
+                .0
+                .map(|v| {
+                    let mut buf = vec![0u8; 32];
+                    v.to_big_endian(&mut buf);
+                    buf
+                })
+                .to_vec(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

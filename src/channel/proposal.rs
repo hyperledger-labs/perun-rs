@@ -5,12 +5,17 @@
 //! arbitrary channel sizes and potentially even arbitrary ways to represent the
 //! data in rust (e.g. using `Vec<T>` vs no-heap `Vec<T>` vs `fixed-size<A,P>`).
 
-use super::{agreed_upon::AgreedUponChannel, fixed_size_payment, NonceShare, PartID};
+use super::{
+    agreed_upon::AgreedUponChannel,
+    fixed_size_payment::{self, ConversionError},
+    NonceShare, PartID,
+};
 use crate::{
     abiencode::{
         self,
-        types::{Address, Hash, U256},
+        types::{Address, Bytes32, Hash, U256},
     },
+    perunwire,
     wire::{MessageBus, ParticipantMessage},
     PerunClient,
 };
@@ -34,12 +39,112 @@ pub struct LedgerChannelProposal {
     pub participant: Address,
 }
 
+impl TryFrom<perunwire::LedgerChannelProposalMsg> for LedgerChannelProposal {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::LedgerChannelProposalMsg) -> Result<Self, Self::Error> {
+        let base = match value.base_channel_proposal {
+            Some(v) => v,
+            None => return Err(ConversionError::ExptectedSome),
+        };
+        let init_bals = match base.init_bals {
+            Some(v) => v,
+            None => return Err(ConversionError::ExptectedSome),
+        };
+        let funding_agreement = match base.funding_agreement {
+            Some(v) => v,
+            None => return Err(ConversionError::ExptectedSome),
+        };
+
+        Ok(LedgerChannelProposal {
+            proposal_id: Hash(
+                base.proposal_id
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            challenge_duration: base.challenge_duration,
+            nonce_share: Bytes32(
+                base.nonce_share
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            init_bals: init_bals.try_into()?,
+            funding_agreement: funding_agreement.try_into()?,
+            participant: Address(
+                value
+                    .participant
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+        })
+    }
+}
+
+impl From<LedgerChannelProposal> for perunwire::LedgerChannelProposalMsg {
+    fn from(value: LedgerChannelProposal) -> Self {
+        Self {
+            base_channel_proposal: Some(perunwire::BaseChannelProposal {
+                proposal_id: value.proposal_id.0.to_vec(),
+                challenge_duration: value.challenge_duration,
+                nonce_share: value.nonce_share.0.to_vec(),
+                app: vec![],
+                init_data: vec![],
+                init_bals: Some(value.init_bals.into()),
+                funding_agreement: Some(value.funding_agreement.into()),
+            }),
+            participant: value.participant.0.to_vec(),
+            peers: vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()], // TODO: Use real data
+        }
+    }
+}
+
 /// Message sent when a participant accepts the proposed channel.
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelProposalAcc {
     proposal_id: Hash,
     nonce_share: NonceShare,
     participant: Address,
+}
+
+impl TryFrom<perunwire::LedgerChannelProposalAccMsg> for LedgerChannelProposalAcc {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::LedgerChannelProposalAccMsg) -> Result<Self, Self::Error> {
+        let base = value
+            .base_channel_proposal_acc
+            .ok_or(ConversionError::ExptectedSome)?;
+
+        Ok(Self {
+            proposal_id: Hash(
+                base.proposal_id
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            nonce_share: Bytes32(
+                base.nonce_share
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            participant: Address(
+                value
+                    .participant
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+        })
+    }
+}
+
+impl From<LedgerChannelProposalAcc> for perunwire::LedgerChannelProposalAccMsg {
+    fn from(value: LedgerChannelProposalAcc) -> Self {
+        Self {
+            base_channel_proposal_acc: Some(perunwire::BaseChannelProposalAcc {
+                proposal_id: value.proposal_id.0.to_vec(),
+                nonce_share: value.nonce_share.0.to_vec(),
+            }),
+            participant: value.participant.0.to_vec(),
+        }
+    }
 }
 
 /// Error returned when the proposal was already accepted by a participant.
@@ -175,6 +280,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         // Go-Perun does NOT use keccak256 here, probably to be less dependent
         // on Ethereum. We do the same here.
         let mut hasher = Sha3_256::new();
+        hasher.update(self.proposal.nonce_share.0);
 
         // Go through all responses and make sure none is missing. Additionally
         // collect information needed later.
@@ -206,7 +312,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             challenge_duration: self.proposal.challenge_duration,
             nonce: nonce,
             participants,
-            app: [],
+            app: Address([0u8; 20]),
             ledger_channel: true,
             virtual_channel: false,
         };
