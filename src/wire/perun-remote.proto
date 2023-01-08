@@ -34,7 +34,13 @@ message WatchResponseMsg {
 
 message ForceCloseRequestMsg {
     bytes channel_id = 1;
-    optional WatchUpdateMsg latest = 2;
+    // Implicitly optional (messages have explicit presence). I'd love to mark
+    // it explicitly as optional to indicate that it is intentionally optional,
+    // but that requires protoc version 3.15 which the CI does not have (version
+    // on Ubuntu: 3.12.4). We could either enable the experimental flag or
+    // remove the optional flag. Since the flag doesn't make a real difference
+    // here due to the "message" type, I've removed it.
+    WatchUpdateMsg latest = 2;
 }
 
 message ForceCloseResponseMsg {
