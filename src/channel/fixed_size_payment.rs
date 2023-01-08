@@ -20,6 +20,7 @@ pub enum ConversionError {
     AssetSizeMissmatch,
     ByteLengthMissmatch,
     ExptectedSome,
+    StateChannelsNotSupported,
 }
 
 /// Parameters for this channel, exchanged during channel proposal and sent
@@ -33,6 +34,59 @@ pub struct Params<const P: usize> {
     pub app: Address,
     pub ledger_channel: bool,
     pub virtual_channel: bool,
+}
+
+impl<const P: usize> Params<P> {
+    fn channel_id(&self) -> Result<Hash, abiencode::Error> {
+        abiencode::to_hash(self)
+    }
+}
+
+impl<const P: usize> TryFrom<perunwire::Params> for Params<P> {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::Params) -> Result<Self, Self::Error> {
+        let mut participants = [Address::default(); P];
+        for (a, b) in participants.iter_mut().zip(value.parts) {
+            *a = Address(b.try_into().or(Err(ConversionError::ByteLengthMissmatch))?);
+        }
+
+        Ok(Self {
+            challenge_duration: value.challenge_duration,
+            nonce: U256::from_big_endian(&value.nonce),
+            participants,
+            app: Address(
+                value
+                    .app
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            ledger_channel: value.ledger_channel,
+            virtual_channel: value.virtual_channel,
+        })
+    }
+}
+
+impl<const P: usize> From<Params<P>> for perunwire::Params {
+    fn from(value: Params<P>) -> Self {
+        Self {
+            id: value
+                .channel_id()
+                .expect("should be impossible to get an encoding-error for a Params object")
+                .0
+                .to_vec(),
+            challenge_duration: value.challenge_duration,
+            nonce: {
+                let mut buf = vec![0u8; 32];
+                value.nonce.to_big_endian(&mut buf);
+                buf
+            },
+            parts: value.participants.map(|a| a.0.to_vec()).to_vec(),
+            app: value.app.0.to_vec(),
+            ledger_channel: value.ledger_channel,
+            virtual_channel: value.virtual_channel,
+        }
+    }
 }
 
 /// Stores the complete state of a channel.
@@ -57,9 +111,8 @@ impl<const A: usize, const P: usize> State<A, P> {
 
 impl<const A: usize, const P: usize> State<A, P> {
     pub fn new(params: Params<P>, init_bals: Allocation<A, P>) -> Result<Self, abiencode::Error> {
-        let id = abiencode::to_hash(&params)?;
         Ok(State {
-            id,
+            id: params.channel_id()?,
             version: 0,
             outcome: init_bals,
             app_data: [],
@@ -81,6 +134,45 @@ impl<const A: usize, const P: usize> State<A, P> {
             outcome: self.outcome,
             app_data: self.app_data,
             is_final: self.is_final,
+        }
+    }
+}
+
+impl<const A: usize, const P: usize> TryFrom<perunwire::State> for State<A, P> {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::State) -> Result<Self, Self::Error> {
+        if value.data.len() != 0 {
+            return Err(ConversionError::StateChannelsNotSupported);
+        }
+
+        Ok(Self {
+            id: Hash(
+                value
+                    .id
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            version: value.version,
+            outcome: value
+                .allocation
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            app_data: [],
+            is_final: value.is_final,
+        })
+    }
+}
+
+impl<const A: usize, const P: usize> From<State<A, P>> for perunwire::State {
+    fn from(value: State<A, P>) -> Self {
+        Self {
+            id: value.id.0.to_vec(),
+            version: value.version,
+            allocation: Some(value.outcome.into()),
+            app: vec![], // Only different if it is a state channel, which we don't support, yet
+            data: value.app_data.to_vec(),
+            is_final: value.is_final,
         }
     }
 }
@@ -107,7 +199,6 @@ impl<const A: usize, const P: usize> TryFrom<perunwire::Balances> for Balances<A
         if value.balances.len() != A {
             Err(ConversionError::AssetSizeMissmatch)
         } else {
-            // let mut balances: Balances<A, P> = ParticipantBalances([])
             let mut balances = Self::default();
             for (a, b) in balances.0.iter_mut().zip(value.balances) {
                 *a = b.try_into()?;

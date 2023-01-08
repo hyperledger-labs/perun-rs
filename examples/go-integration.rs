@@ -28,6 +28,17 @@ struct Bus {
 
 impl Bus {
     fn recv_envelope(&self) -> Envelope {
+        let buf = self.recv();
+
+        // Decode data (the Encoding Layer currently does not decode, so to
+        // print stuff or call methods we have to do it at the moment).
+        let msg = Envelope::decode(buf.as_slice()).unwrap();
+        println!("Received: {:#?}", msg);
+
+        msg
+    }
+
+    fn recv(&self) -> Vec<u8> {
         let mut stream = self.stream.borrow_mut();
         // big endian u16 for length in bytes
         let mut buf = [0u8; 2];
@@ -36,13 +47,7 @@ impl Bus {
         // Protobuf encoded data
         let mut buf = vec![0u8; len as usize];
         stream.read_exact(&mut buf).unwrap();
-
-        // Decode data (the Encoding Layer currently does not decode, so to
-        // print stuff or call methods we have to do it at the moment).
-        let msg = Envelope::decode(buf.as_slice()).unwrap();
-        println!("Received: {:#?}", msg);
-
-        msg
+        buf
     }
 }
 
@@ -160,6 +165,15 @@ fn main() {
     }
 
     print_bold!("Alice: Received all signatures, send to watcher/funder");
+
+    let channel = channel.build().unwrap();
+    // Receive acknowledgements (currently not checked but we have to read them
+    // anyways). At the moment it is not completely clear how exactly we want to
+    // allow sending both types through the same session, we might need changes
+    // to the original protobuf definition or use a completely separate port
+    // with its own "Envelope"-like message.
+    bus.recv();
+    bus.recv();
 
     print_bold!("Alice done");
 }
