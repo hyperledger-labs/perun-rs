@@ -4,6 +4,19 @@ import "wire.proto";
 
 package perunremote;
 
+message Message {
+    oneof msg {
+        FundingRequestMsg funding_request = 1;
+        FundingResponseMsg funding_response = 2;
+        WatchRequestMsg watch_request = 3;
+        WatchUpdateMsg watch_update = 4;
+        WatchResponseMsg watch_response = 5;
+        ForceCloseRequestMsg force_close_request = 6;
+        ForceCloseResponseMsg force_close_response = 7;
+        DisputeNotification dispute_notification = 8;
+    }
+}
+
 message FundingRequestMsg {
     uint32 participant = 1;
     perunwire.Params params = 2;
