@@ -172,8 +172,9 @@ fn main() {
     // allow sending both types through the same session, we might need changes
     // to the original protobuf definition or use a completely separate port
     // with its own "Envelope"-like message.
-    bus.recv();
-    bus.recv();
+
+    // bus.recv(); // TODO: Uncomment once the Go-side replies
+    // bus.recv(); // TODO: Uncomment once the Go-side replies
 
     print_bold!("Alice done");
 }

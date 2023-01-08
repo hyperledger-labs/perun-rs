@@ -1,7 +1,7 @@
 use prost::{bytes::BufMut, EncodeError};
 
 use super::{BytesBus, FunderMessage, MessageBus, ParticipantMessage, WatcherMessage};
-use crate::perunwire::{self, envelope, message, AuthResponseMsg, Envelope, Message};
+use crate::perunwire::{envelope, message, AuthResponseMsg, Envelope, Message};
 
 #[derive(Debug)]
 pub struct ProtoBufEncodingLayer<B: BytesBus> {
@@ -44,7 +44,14 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
     }
 
     fn send_to_funder(&self, msg: FunderMessage) {
-        todo!()
+        let wiremsg: message::Msg = match msg {
+            FunderMessage::FundingRequest(msg) => message::Msg::FundingRequest(msg.into()),
+            FunderMessage::Funded { .. } => todo!(),
+        };
+        let envelope = Message { msg: Some(wiremsg) };
+
+        let buf = Self::encode(envelope).unwrap();
+        self.bus.send_to_participants(&buf);
     }
 
     fn send_to_participants(&self, msg: ParticipantMessage) {

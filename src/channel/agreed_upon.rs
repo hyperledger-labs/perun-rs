@@ -75,6 +75,38 @@ pub struct LedgerChannelFundingRequest {
     pub state: State,
 }
 
+impl TryFrom<perunwire::FundingRequestMsg> for LedgerChannelFundingRequest {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::FundingRequestMsg) -> Result<Self, Self::Error> {
+        Ok(Self {
+            funding_agreement: value
+                .funding_agreement
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            params: value
+                .params
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            state: value
+                .initial_state
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+        })
+    }
+}
+
+impl From<LedgerChannelFundingRequest> for perunwire::FundingRequestMsg {
+    fn from(value: LedgerChannelFundingRequest) -> Self {
+        Self {
+            funding_agreement: Some(value.funding_agreement.into()),
+            params: Some(value.params.into()),
+            initial_state: Some(value.state.into()),
+            participant: 1, // TODO
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelUpdateAccepted {
     pub channel: Hash,
