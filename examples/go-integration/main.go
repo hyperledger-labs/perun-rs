@@ -142,12 +142,32 @@ func main() {
 	go c.Handle(proposalHandler, updateHandler)
 	go bus.Listen(listener)
 
+	// Dummy listener (used as an endpoint for Watcher+Funder messages while not
+	// implemented)
 	go func() {
 		// Listen for any connection attempt on port 1338 and send out some
 		// information like the ETH holder address. (needed for this example,
 		// we're assuming the application already knows these values (for now
 		// at least))
 		l, err := net.Listen("tcp", "127.0.0.1:1338")
+		if err != nil {
+			panic(err)
+		}
+		for {
+			_, err := l.Accept()
+			if err != nil {
+				panic(err)
+			}
+		}
+	}()
+
+	// Listener for giving the EthHolder address to Rust (only needed for example)
+	go func() {
+		// Listen for any connection attempt on port 1338 and send out some
+		// information like the ETH holder address. (needed for this example,
+		// we're assuming the application already knows these values (for now
+		// at least))
+		l, err := net.Listen("tcp", "127.0.0.1:1339")
 		if err != nil {
 			panic(err)
 		}
