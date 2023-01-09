@@ -2,6 +2,7 @@ use prost::{bytes::BufMut, EncodeError};
 
 use super::{BytesBus, FunderMessage, MessageBus, ParticipantMessage, WatcherMessage};
 use crate::perunwire::{envelope, message, AuthResponseMsg, Envelope, Message};
+use alloc::vec::Vec;
 
 #[derive(Debug)]
 pub struct ProtoBufEncodingLayer<B: BytesBus> {

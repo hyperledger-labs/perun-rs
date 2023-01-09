@@ -12,6 +12,7 @@ use crate::{
     },
     perunwire,
 };
+use alloc::vec;
 use serde::Serialize;
 
 #[derive(Debug)]
