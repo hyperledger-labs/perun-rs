@@ -13,10 +13,11 @@ jobs:
     name: Tests
     runs-on: ubuntu-22.04
     steps:
-      - name: Install protobuf
+      - name: Install non-rust dependencies
         shell: bash
         run: |
             sudo apt-get install protobuf-compiler
+            rustup target add thumbv7em-none-eabi
       - name: Checkout Repo
         uses: actions/checkout@v3
         with:
@@ -27,3 +28,5 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Cargo test
         run: cargo test --all-features
+      - name: no_std compatibility
+        run: cargo check --target thumbv7em-none-eabi --no-default-features --lib
