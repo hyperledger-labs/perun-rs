@@ -64,6 +64,38 @@ pub struct LedgerChannelWatchUpdate {
     pub signatures: [Signature; PARTICIPANTS],
 }
 
+impl TryFrom<perunwire::WatchUpdateMsg> for LedgerChannelWatchUpdate {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::WatchUpdateMsg) -> Result<Self, Self::Error> {
+        if value.sigs.len() != PARTICIPANTS {
+            Err(ConversionError::ParticipantSizeMissmatch)
+        } else {
+            let mut signatures = [Signature::default(); PARTICIPANTS];
+            for (a, b) in signatures.iter_mut().zip(value.sigs) {
+                *a = Signature(b.try_into().or(Err(ConversionError::ByteLengthMissmatch))?)
+            }
+
+            Ok(Self {
+                state: value
+                    .state
+                    .ok_or(ConversionError::ExptectedSome)?
+                    .try_into()?,
+                signatures,
+            })
+        }
+    }
+}
+
+impl From<LedgerChannelWatchUpdate> for perunwire::WatchUpdateMsg {
+    fn from(value: LedgerChannelWatchUpdate) -> Self {
+        Self {
+            state: Some(value.state.into()),
+            sigs: value.signatures.map(|s| s.0.to_vec()).to_vec(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ProposeUpdateError {
     AbiEncodeError(abiencode::Error),

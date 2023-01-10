@@ -2,8 +2,8 @@ use prost::{bytes::BufMut, EncodeError};
 
 use super::{BytesBus, FunderMessage, MessageBus, ParticipantMessage, WatcherMessage};
 use crate::perunwire::{
-    envelope, message, AuthResponseMsg, ChannelProposalRejMsg, ChannelUpdateMsg,
-    ChannelUpdateRejMsg, Envelope, Message,
+    envelope, message, AuthResponseMsg, ChannelProposalRejMsg, ChannelUpdateRejMsg, Envelope,
+    Message,
 };
 use alloc::vec::Vec;
 
@@ -35,7 +35,7 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
     fn send_to_watcher(&self, msg: WatcherMessage) {
         let wiremsg: message::Msg = match msg {
             WatcherMessage::WatchRequest(msg) => message::Msg::WatchRequest(msg.into()),
-            WatcherMessage::Update(_) => todo!(),
+            WatcherMessage::Update(msg) => message::Msg::WatchUpdate(msg.into()),
             WatcherMessage::Ack { .. } => unimplemented!("We only receive this Message Type"),
             WatcherMessage::StartDispute(_) => todo!(),
             WatcherMessage::DisputeAck { .. } => {
