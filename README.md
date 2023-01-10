@@ -10,6 +10,10 @@ Watching the blockchain for disputes and for funding a new channel.
 # Execute all tests
 cargo test --all-features
 
+# Run go-integration example/walkthrough (run in separate terminals)
+cd examples/go-integration; go run . ; cd -
+cargo run --example go-integration
+
 # Run Example/Walkthrough (can be configured at the top with constants)
 cargo run --example lowlevel_basic_channel
 
