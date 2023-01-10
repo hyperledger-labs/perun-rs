@@ -36,10 +36,14 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
         let wiremsg: message::Msg = match msg {
             WatcherMessage::WatchRequest(msg) => message::Msg::WatchRequest(msg.into()),
             WatcherMessage::Update(_) => todo!(),
-            WatcherMessage::Ack { .. } => todo!(),
+            WatcherMessage::Ack { .. } => unimplemented!("We only receive this Message Type"),
             WatcherMessage::StartDispute(_) => todo!(),
-            WatcherMessage::DisputeAck { .. } => todo!(),
-            WatcherMessage::DisputeNotification { .. } => todo!(),
+            WatcherMessage::DisputeAck { .. } => {
+                unimplemented!("We only receive this Message Type")
+            }
+            WatcherMessage::DisputeNotification { .. } => {
+                unimplemented!("We only receive this Message Type")
+            }
         };
         let envelope = Message { msg: Some(wiremsg) };
 
@@ -50,7 +54,9 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
     fn send_to_funder(&self, msg: FunderMessage) {
         let wiremsg: message::Msg = match msg {
             FunderMessage::FundingRequest(msg) => message::Msg::FundingRequest(msg.into()),
-            FunderMessage::Funded { .. } => todo!(),
+            FunderMessage::Funded { .. } => {
+                unimplemented!("We only receive this Message Type")
+            }
         };
         let envelope = Message { msg: Some(wiremsg) };
 
