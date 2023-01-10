@@ -2,7 +2,8 @@ use prost::{bytes::BufMut, EncodeError};
 
 use super::{BytesBus, FunderMessage, MessageBus, ParticipantMessage, WatcherMessage};
 use crate::perunwire::{
-    envelope, message, AuthResponseMsg, ChannelProposalRejMsg, Envelope, Message,
+    envelope, message, AuthResponseMsg, ChannelProposalRejMsg, ChannelUpdateRejMsg, Envelope,
+    Message,
 };
 use alloc::vec::Vec;
 
@@ -76,7 +77,15 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
             ParticipantMessage::ChannelUpdateAccepted(msg) => {
                 envelope::Msg::ChannelUpdateAccMsg(msg.into())
             }
-            ParticipantMessage::ChannelUpdateRejected { .. } => todo!(),
+            ParticipantMessage::ChannelUpdateRejected {
+                id,
+                version,
+                reason,
+            } => envelope::Msg::ChannelUpdateRejMsg(ChannelUpdateRejMsg {
+                channel_id: id.0.to_vec(),
+                version,
+                reason,
+            }),
         };
 
         let envelope = Envelope {

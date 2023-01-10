@@ -72,10 +72,12 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
         }
     }
 
-    pub fn reject(self) {
+    pub fn reject(self, reason: &str) {
         self.channel.client().bus.send_to_participants(
             crate::wire::ParticipantMessage::ChannelUpdateRejected {
                 id: self.channel.channel_id(),
+                version: self.new_state.version(),
+                reason: reason.to_owned(),
             },
         );
     }

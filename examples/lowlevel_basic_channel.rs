@@ -185,7 +185,7 @@ async fn alice(bus: Bus) {
                 // service.
                 bus.service_rx.recv().unwrap();
             } else {
-                update.reject();
+                update.reject("Alice configured to reject update");
             }
         }
         _ => panic!("Unexpected Message or channel closure"),
@@ -349,7 +349,7 @@ async fn bob(bus: Bus) {
                     print_bold!("Bob done: Channel closed normally and the Watcher has the data");
                     return;
                 } else {
-                    update.reject();
+                    update.reject("Bob configured to reject normal close");
                 }
             }
             Ok(_) => panic!("Unexpected message"),

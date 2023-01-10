@@ -70,8 +70,15 @@ pub enum ParticipantMessage {
     Auth,
     ChannelProposal(LedgerChannelProposal),
     ProposalAccepted(LedgerChannelProposalAcc),
-    ProposalRejected { id: Hash, reason: String },
+    ProposalRejected {
+        id: Hash,
+        reason: String,
+    },
     ChannelUpdate(LedgerChannelUpdate),
     ChannelUpdateAccepted(LedgerChannelUpdateAccepted),
-    ChannelUpdateRejected { id: Hash },
+    ChannelUpdateRejected {
+        id: Hash,
+        version: u64,
+        reason: String,
+    },
 }
