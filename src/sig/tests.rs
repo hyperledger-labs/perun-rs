@@ -121,35 +121,3 @@ make_a_to_b!(
     super::k256::Signer,
     super::secp256k1::Signer
 );
-
-// #[cfg(feature = "secp256k1")]
-// fn secp256k1_sign() {
-//     // This test may break in the future (e.g. if the dependency changes
-//     // internally), they exist to allow checking if a signature is valid
-//     // on-chain without needing a real blockchain or ganache.
-
-//     // Do not use that on any real device, this is just for testing.
-//     let mut rng = StdRng::seed_from_u64(0);
-//     let signer = super::secp256k1::Signer::new(&mut rng);
-
-//     let sig = signer.sign_eth(data());
-
-//     assert_eq!(signer.address().0.encode_hex::<String>(), "");
-//     assert_eq!(sig.0.encode_hex::<String>(), ""[2..]);
-// }
-
-// #[cfg(feature = "k256")]
-// fn k256_sign() {
-//     // This test may break in the future (e.g. if the dependency changes
-//     // internally), they exist to allow checking if a signature is valid
-//     // on-chain without needing a real blockchain or ganache.
-
-//     // Do not use that on any real device, this is just for testing.
-//     let mut rng = StdRng::seed_from_u64(0);
-//     let signer = super::k256::Signer::new(&mut rng);
-
-//     let sig = signer.sign_eth(data());
-
-//     assert_eq!(signer.address().0.encode_hex::<String>(), "");
-//     assert_eq!(sig.0.encode_hex::<String>(), ""[2..]);
-// }

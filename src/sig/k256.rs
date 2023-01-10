@@ -4,7 +4,7 @@ use crate::abiencode::types::{Address, Hash, Signature};
 use k256::{
     ecdsa::{
         recoverable,
-        signature::{hazmat::PrehashSigner, Signature as k256Signature, Signer as k256SignerTrait},
+        signature::{hazmat::PrehashSigner, Signature as k256Signature},
         SigningKey, VerifyingKey,
     },
     elliptic_curve::sec1::ToEncodedPoint,

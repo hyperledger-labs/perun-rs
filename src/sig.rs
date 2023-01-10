@@ -16,6 +16,7 @@ mod tests;
 // Import the requested implementation(s), as well as the dummy fallback to make
 // sure it always compiles, too, even if the feature flags are set.
 #[doc(hidden)]
+#[cfg(not(any(feature = "secp256k1", feature = "k256")))]
 mod dummy;
 #[cfg(feature = "k256")]
 #[cfg_attr(docsrs, doc(cfg(feature = "k256")))]
