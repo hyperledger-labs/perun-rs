@@ -29,4 +29,4 @@ jobs:
       - name: Cargo test
         run: cargo test --all-features
       - name: no_std compatibility
-        run: cargo check --target thumbv7em-none-eabi --no-default-features --lib
+        run: cargo check --target thumbv7em-none-eabi --no-default-features --lib -F k256
