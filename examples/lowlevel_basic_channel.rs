@@ -92,7 +92,7 @@ macro_rules! print_user_interaction {
 /// Alice: Proposes new channel.
 async fn alice(bus: Bus) {
     let signer = Signer::new(&mut rand::thread_rng());
-    let addr = signer.addr;
+    let addr = signer.address();
     let client = PerunClient::new(&bus, signer);
 
     // Create channel proposal (user configuration)
@@ -226,7 +226,7 @@ async fn alice(bus: Bus) {
 /// Bob: Reacts to a proposed channel.
 async fn bob(bus: Bus) {
     let signer = Signer::new(&mut rand::thread_rng());
-    let addr = signer.addr;
+    let addr = signer.address();
     let client = PerunClient::new(&bus, signer);
 
     // Wait for Channel Proposal, then accept it

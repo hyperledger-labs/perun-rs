@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(hash, expected);
     }
 
-    #[cfg(feature = "secp256k1")]
+    #[cfg(feature = "std")]
     #[test]
     fn state_1a2p_sign() {
         use rand::{rngs::StdRng, SeedableRng};
@@ -503,14 +503,14 @@ mod tests {
 
         let sig = signer.sign_eth(hash);
 
-        println!("Signer: 0x{:}", signer.addr.0.encode_hex::<String>());
+        println!("Signer: 0x{:}", signer.address().0.encode_hex::<String>());
         println!("Sig: 0x{}", sig.0.encode_hex::<String>());
 
         // Test against some known good values (constant because we seed the
         // randomness with 0). When changing these make sure that they are
         // accepted by a smart contract.
         assert_eq!(
-            signer.addr.0.encode_hex::<String>(),
+            signer.address().0.encode_hex::<String>(),
             "0xa9572220348b1080264e81c0779f77c144790cd6"[2..]
         );
         assert_eq!(

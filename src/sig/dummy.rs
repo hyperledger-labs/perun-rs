@@ -15,6 +15,14 @@ pub struct Error {}
 pub struct Signer {}
 
 impl Signer {
+    pub fn new<R: rand::Rng + rand::CryptoRng>(rng: &mut R) -> Self {
+        unimplemented!()
+    }
+
+    pub fn address(&self) -> Address {
+        unimplemented!()
+    }
+
     pub fn sign_eth(&self, _msg: Hash) -> Signature {
         unimplemented!()
     }

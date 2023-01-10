@@ -8,17 +8,17 @@ use secp256k1::{
     All, Message, Secp256k1, SecretKey,
 };
 
-pub type Error = secp256k1::Error;
+pub use secp256k1::Error;
 
 #[derive(Debug)]
 pub struct Signer {
-    pub secp: Secp256k1<All>,
+    secp: Secp256k1<All>,
     sk: SecretKey,
-    pub addr: Address,
+    addr: Address,
 }
 
 impl Signer {
-    pub fn new<R: rand::Rng>(rng: &mut R) -> Self {
+    pub fn new<R: rand::Rng + rand::CryptoRng>(rng: &mut R) -> Self {
         let secp = Secp256k1::new();
         let (sk, pk) = secp.generate_keypair(rng);
 
@@ -27,6 +27,10 @@ impl Signer {
             sk,
             addr: pk.into(),
         }
+    }
+
+    pub fn address(&self) -> Address {
+        self.addr
     }
 
     /// Sign a hash using a Ethereum 65-byte recoverable signature.
