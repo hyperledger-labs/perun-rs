@@ -1,10 +1,7 @@
-use super::{
-    active::ActiveChannel, agreed_upon::AddSignatureError, fixed_size_payment,
-    LedgerChannelUpdateAccepted, PartID,
-};
+use super::{active::ActiveChannel, agreed_upon::AddSignatureError, fixed_size_payment, PartID};
 use crate::{
     abiencode::{self, types::Signature},
-    messages::ParticipantMessage,
+    messages::{LedgerChannelUpdateAccepted, ParticipantMessage},
     wire::MessageBus,
 };
 use alloc::string::ToString;

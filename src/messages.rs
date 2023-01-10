@@ -1,7 +1,9 @@
 mod funding_request;
+mod update;
 mod watch_request;
 
 pub use funding_request::LedgerChannelFundingRequest;
+pub use update::LedgerChannelUpdateAccepted;
 pub use watch_request::LedgerChannelWatchRequest;
 
 use core::fmt::Debug;
@@ -10,7 +12,7 @@ use crate::{
     abiencode::types::Hash,
     channel::{
         LedgerChannelProposal, LedgerChannelProposalAcc, LedgerChannelUpdate,
-        LedgerChannelUpdateAccepted, LedgerChannelWatchUpdate,
+        LedgerChannelWatchUpdate,
     },
 };
 use alloc::string::String;
