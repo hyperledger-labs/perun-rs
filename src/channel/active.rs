@@ -7,7 +7,7 @@ use crate::{
         self,
         types::{Address, Hash, Signature},
     },
-    messages::{ConversionError, ParticipantMessage, WatcherMessage},
+    messages::{ConversionError, ParticipantMessage, WatcherRequestMessage},
     perunwire, sig,
     wire::MessageBus,
     PerunClient,
@@ -223,7 +223,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub fn send_current_state_to_watcher(&self) {
         self.client
             .bus
-            .send_to_watcher(WatcherMessage::Update(LedgerChannelWatchUpdate {
+            .send_to_watcher(WatcherRequestMessage::Update(LedgerChannelWatchUpdate {
                 state: self.state,
                 signatures: self.signatures,
             }))
@@ -244,10 +244,12 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub fn force_close(self) {
         self.client
             .bus
-            .send_to_watcher(WatcherMessage::StartDispute(LedgerChannelWatchUpdate {
-                state: self.state,
-                signatures: self.signatures,
-            }));
+            .send_to_watcher(WatcherRequestMessage::StartDispute(
+                LedgerChannelWatchUpdate {
+                    state: self.state,
+                    signatures: self.signatures,
+                },
+            ));
     }
 
     // At the moment this just drops the channel. In the future it might make

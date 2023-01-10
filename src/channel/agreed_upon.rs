@@ -8,7 +8,7 @@ use crate::{
         self,
         types::{Address, Hash, Signature},
     },
-    messages::{ConversionError, FunderMessage, ParticipantMessage, WatcherMessage},
+    messages::{ConversionError, FunderRequestMessage, ParticipantMessage, WatcherRequestMessage},
     perunwire, sig,
     wire::MessageBus,
     PerunClient,
@@ -291,19 +291,23 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
 
         self.client
             .bus
-            .send_to_watcher(WatcherMessage::WatchRequest(LedgerChannelWatchRequest {
-                params: self.params,
-                state: self.init_state,
-                signatures: signatures,
-            }));
+            .send_to_watcher(WatcherRequestMessage::WatchRequest(
+                LedgerChannelWatchRequest {
+                    params: self.params,
+                    state: self.init_state,
+                    signatures: signatures,
+                },
+            ));
 
         self.client
             .bus
-            .send_to_funder(FunderMessage::FundingRequest(LedgerChannelFundingRequest {
-                funding_agreement: self.funding_agreement,
-                params: self.params,
-                state: self.init_state,
-            }));
+            .send_to_funder(FunderRequestMessage::FundingRequest(
+                LedgerChannelFundingRequest {
+                    funding_agreement: self.funding_agreement,
+                    params: self.params,
+                    state: self.init_state,
+                },
+            ));
 
         Ok(SignedChannel::new(
             self.client,

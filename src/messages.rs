@@ -19,9 +19,9 @@ pub enum ConversionError {
     StateChannelsNotSupported,
 }
 
-/// Messages sent to/from the Watcher service.
+/// Messages sent to the Watcher service.
 #[derive(Debug)]
-pub enum WatcherMessage {
+pub enum WatcherRequestMessage {
     /// Ask the Watcher to start watching the blockchain for disputes.
     /// Acknowledged with [WatcherMessage::Ack] containing `version == 0`.
     WatchRequest(LedgerChannelWatchRequest),
@@ -30,6 +30,16 @@ pub enum WatcherMessage {
     /// [WatcherMessage::Update] does not necessary need the parameters.
     /// Acknowledged with [WatcherMessage::Ack].
     Update(LedgerChannelWatchUpdate),
+    /// Ask the Watcher to initialize a dispute on-chain, with the given state.
+    /// It currently does not contain the parameters for reducing the amount of
+    /// communication needed. Adding it might be useful to make the watcher less
+    /// stateful.
+    StartDispute(LedgerChannelWatchUpdate),
+}
+
+/// Messages sent from the Watcher service.
+#[derive(Debug)]
+pub enum WatcherReplyMessage {
     /// Reply from the Watcher that a state has been received and will be used
     /// in a dispute case.
     Ack { id: Hash, version: u64 },
@@ -37,8 +47,6 @@ pub enum WatcherMessage {
     /// It currently does not contain the parameters for reducing the amount of
     /// communication needed. Adding it might be useful to make the watcher less
     /// stateful.
-    StartDispute(LedgerChannelWatchUpdate),
-    /// Acknowledgement of [WatcherMessage::StartDispute]
     DisputeAck { id: Hash },
     /// Used by the Watcher to notify the device of the existence of an on-chain
     /// dispute. This way the device knows that it does not/should not continue
@@ -46,10 +54,15 @@ pub enum WatcherMessage {
     DisputeNotification { id: Hash },
 }
 
-/// Messages sent to/from the Funder service.
+/// Messages sent to the Funder service.
 #[derive(Debug)]
-pub enum FunderMessage {
+pub enum FunderRequestMessage {
     FundingRequest(LedgerChannelFundingRequest),
+}
+
+/// Messages sent from the Funder service.
+#[derive(Debug)]
+pub enum FunderReplyMessage {
     Funded { id: Hash },
 }
 

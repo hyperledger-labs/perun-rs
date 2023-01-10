@@ -1,9 +1,12 @@
 use prost::{bytes::BufMut, EncodeError};
 
-use super::{BytesBus, FunderMessage, MessageBus, ParticipantMessage, WatcherMessage};
-use crate::perunwire::{
-    envelope, message, AuthResponseMsg, ChannelProposalRejMsg, ChannelUpdateRejMsg, Envelope,
-    Message,
+use super::{BytesBus, MessageBus, ParticipantMessage};
+use crate::{
+    messages::{FunderRequestMessage, WatcherRequestMessage},
+    perunwire::{
+        envelope, message, AuthResponseMsg, ChannelProposalRejMsg, ChannelUpdateRejMsg, Envelope,
+        Message,
+    },
 };
 use alloc::vec::Vec;
 
@@ -32,18 +35,11 @@ impl<B: BytesBus> ProtoBufEncodingLayer<B> {
 }
 
 impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
-    fn send_to_watcher(&self, msg: WatcherMessage) {
+    fn send_to_watcher(&self, msg: WatcherRequestMessage) {
         let wiremsg: message::Msg = match msg {
-            WatcherMessage::WatchRequest(msg) => message::Msg::WatchRequest(msg.into()),
-            WatcherMessage::Update(msg) => message::Msg::WatchUpdate(msg.into()),
-            WatcherMessage::Ack { .. } => unimplemented!("We only receive this Message Type"),
-            WatcherMessage::StartDispute(_) => todo!(),
-            WatcherMessage::DisputeAck { .. } => {
-                unimplemented!("We only receive this Message Type")
-            }
-            WatcherMessage::DisputeNotification { .. } => {
-                unimplemented!("We only receive this Message Type")
-            }
+            WatcherRequestMessage::WatchRequest(msg) => message::Msg::WatchRequest(msg.into()),
+            WatcherRequestMessage::Update(msg) => message::Msg::WatchUpdate(msg.into()),
+            WatcherRequestMessage::StartDispute(_) => todo!(),
         };
         let envelope = Message { msg: Some(wiremsg) };
 
@@ -51,12 +47,9 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
         self.bus.send_to_watcher(&buf);
     }
 
-    fn send_to_funder(&self, msg: FunderMessage) {
+    fn send_to_funder(&self, msg: FunderRequestMessage) {
         let wiremsg: message::Msg = match msg {
-            FunderMessage::FundingRequest(msg) => message::Msg::FundingRequest(msg.into()),
-            FunderMessage::Funded { .. } => {
-                unimplemented!("We only receive this Message Type")
-            }
+            FunderRequestMessage::FundingRequest(msg) => message::Msg::FundingRequest(msg.into()),
         };
         let envelope = Message { msg: Some(wiremsg) };
 

@@ -4,7 +4,7 @@ use core::fmt::Debug;
 
 pub use encoding::ProtoBufEncodingLayer;
 
-use crate::messages::{FunderMessage, ParticipantMessage, WatcherMessage};
+use crate::messages::{FunderRequestMessage, ParticipantMessage, WatcherRequestMessage};
 
 pub trait BytesBus: Debug {
     fn send_to_watcher(&self, msg: &[u8]);
@@ -17,7 +17,7 @@ pub trait BytesBus: Debug {
 /// Might be moved into a byte based MessageBus or behind a `unstable` feature
 /// flag.
 pub trait MessageBus: Debug {
-    fn send_to_watcher(&self, msg: WatcherMessage);
-    fn send_to_funder(&self, msg: FunderMessage);
+    fn send_to_watcher(&self, msg: WatcherRequestMessage);
+    fn send_to_funder(&self, msg: FunderRequestMessage);
     fn send_to_participants(&self, msg: ParticipantMessage);
 }
