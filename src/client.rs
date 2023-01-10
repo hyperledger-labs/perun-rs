@@ -1,5 +1,5 @@
-use crate::channel::{LedgerChannelProposal, ProposedChannel};
-use crate::messages::ParticipantMessage;
+use crate::channel::ProposedChannel;
+use crate::messages::{LedgerChannelProposal, ParticipantMessage};
 use crate::sig::Signer;
 use crate::wire::MessageBus;
 use core::fmt::Debug;

@@ -3,11 +3,11 @@
 use perun::{
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
-        Asset, LedgerChannelProposal,
+        Asset,
     },
     messages::{
-        FunderReplyMessage, FunderRequestMessage, ParticipantMessage, WatcherReplyMessage,
-        WatcherRequestMessage,
+        FunderReplyMessage, FunderRequestMessage, LedgerChannelProposal, ParticipantMessage,
+        WatcherReplyMessage, WatcherRequestMessage,
     },
     sig::Signer,
     wire::MessageBus,
