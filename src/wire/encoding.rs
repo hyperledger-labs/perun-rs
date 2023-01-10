@@ -51,7 +51,7 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
         let envelope = Message { msg: Some(wiremsg) };
 
         let buf = Self::encode(envelope).unwrap();
-        self.bus.send_to_participants(&buf);
+        self.bus.send_to_watcher(&buf);
     }
 
     fn send_to_participants(&self, msg: ParticipantMessage) {
