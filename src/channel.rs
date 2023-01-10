@@ -8,7 +8,7 @@ mod signed;
 use crate::abiencode::types::{Address, Bytes32, U256};
 pub use channel_update::ChannelUpdate;
 use core::fmt::Debug;
-pub use proposal::{LedgerChannelProposalAcc, ProposedChannel};
+pub use proposal::ProposedChannel;
 use serde::Serialize;
 
 // Re-exported because it is part of the low-level channel API

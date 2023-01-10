@@ -80,3 +80,52 @@ impl From<LedgerChannelProposal> for perunwire::LedgerChannelProposalMsg {
         }
     }
 }
+
+/// Message sent when a participant accepts the proposed channel.
+#[derive(Debug, Clone, Copy)]
+pub struct LedgerChannelProposalAcc {
+    pub proposal_id: Hash,
+    pub nonce_share: NonceShare,
+    pub participant: Address,
+}
+
+impl TryFrom<perunwire::LedgerChannelProposalAccMsg> for LedgerChannelProposalAcc {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::LedgerChannelProposalAccMsg) -> Result<Self, Self::Error> {
+        let base = value
+            .base_channel_proposal_acc
+            .ok_or(ConversionError::ExptectedSome)?;
+
+        Ok(Self {
+            proposal_id: Hash(
+                base.proposal_id
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            nonce_share: Bytes32(
+                base.nonce_share
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+            participant: Address(
+                value
+                    .participant
+                    .try_into()
+                    .or(Err(ConversionError::ByteLengthMissmatch))?,
+            ),
+        })
+    }
+}
+
+impl From<LedgerChannelProposalAcc> for perunwire::LedgerChannelProposalAccMsg {
+    fn from(value: LedgerChannelProposalAcc) -> Self {
+        Self {
+            base_channel_proposal_acc: Some(perunwire::BaseChannelProposalAcc {
+                proposal_id: value.proposal_id.0.to_vec(),
+                nonce_share: value.nonce_share.0.to_vec(),
+            }),
+            participant: value.participant.0.to_vec(),
+        }
+    }
+}
