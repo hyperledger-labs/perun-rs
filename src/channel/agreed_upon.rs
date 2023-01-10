@@ -26,11 +26,85 @@ pub struct LedgerChannelWatchRequest {
     pub signatures: [Signature; PARTICIPANTS],
 }
 
+impl TryFrom<perunwire::WatchRequestMsg> for LedgerChannelWatchRequest {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::WatchRequestMsg) -> Result<Self, Self::Error> {
+        let signed_state = value.state.ok_or(ConversionError::ExptectedSome)?;
+
+        if signed_state.sigs.len() != PARTICIPANTS {
+            return Err(ConversionError::ParticipantSizeMissmatch);
+        }
+
+        let mut signatures = [Signature::default(); PARTICIPANTS];
+        for (a, b) in signatures.iter_mut().zip(signed_state.sigs) {
+            *a = Signature(b.try_into().or(Err(ConversionError::ByteLengthMissmatch))?);
+        }
+
+        Ok(Self {
+            params: signed_state
+                .params
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            state: signed_state
+                .state
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            signatures,
+        })
+    }
+}
+
+impl From<LedgerChannelWatchRequest> for perunwire::WatchRequestMsg {
+    fn from(value: LedgerChannelWatchRequest) -> Self {
+        Self {
+            participant: 1, // TODO
+            state: Some(perunwire::SignedState {
+                params: Some(value.params.into()),
+                state: Some(value.state.into()),
+                sigs: value.signatures.map(|sig| sig.0.to_vec()).to_vec(),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelFundingRequest {
     pub funding_agreement: Balances,
     pub params: Params,
     pub state: State,
+}
+
+impl TryFrom<perunwire::FundingRequestMsg> for LedgerChannelFundingRequest {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::FundingRequestMsg) -> Result<Self, Self::Error> {
+        Ok(Self {
+            funding_agreement: value
+                .funding_agreement
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            params: value
+                .params
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            state: value
+                .initial_state
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+        })
+    }
+}
+
+impl From<LedgerChannelFundingRequest> for perunwire::FundingRequestMsg {
+    fn from(value: LedgerChannelFundingRequest) -> Self {
+        Self {
+            funding_agreement: Some(value.funding_agreement.into()),
+            params: Some(value.params.into()),
+            initial_state: Some(value.state.into()),
+            participant: 1, // TODO
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

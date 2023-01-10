@@ -3,7 +3,7 @@ use perun::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
         Asset, LedgerChannelProposal,
     },
-    perunwire::{envelope, Envelope},
+    perunwire::{self, envelope},
     sig::Signer,
     wire::{BytesBus, ProtoBufEncodingLayer},
     Address, PerunClient,
@@ -24,11 +24,31 @@ const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
 struct Bus {
     participant: usize,
     stream: RefCell<TcpStream>,
+    remote_stream: RefCell<TcpStream>,
 }
 
 impl Bus {
-    fn recv_envelope(&self) -> Envelope {
-        let mut stream = self.stream.borrow_mut();
+    fn recv_envelope(&self) -> perunwire::Envelope {
+        Self::recv_to(&self.stream)
+    }
+
+    fn recv_message(&self) -> perunwire::Message {
+        Self::recv_to(&self.remote_stream)
+    }
+
+    fn recv_to<T: Message + Default>(stream: &RefCell<TcpStream>) -> T {
+        let buf = Self::recv(stream);
+
+        // Decode data (the Encoding Layer currently does not decode, so to
+        // print stuff or call methods we have to do it at the moment).
+        let msg = T::decode(buf.as_slice()).unwrap();
+        println!("Received: {:#?}", msg);
+
+        msg
+    }
+
+    fn recv(stream: &RefCell<TcpStream>) -> Vec<u8> {
+        let mut stream = stream.borrow_mut();
         // big endian u16 for length in bytes
         let mut buf = [0u8; 2];
         stream.read_exact(&mut buf).unwrap();
@@ -36,25 +56,19 @@ impl Bus {
         // Protobuf encoded data
         let mut buf = vec![0u8; len as usize];
         stream.read_exact(&mut buf).unwrap();
-
-        // Decode data (the Encoding Layer currently does not decode, so to
-        // print stuff or call methods we have to do it at the moment).
-        let msg = Envelope::decode(buf.as_slice()).unwrap();
-        println!("Received: {:#?}", msg);
-
-        msg
+        buf
     }
 }
 
 impl BytesBus for &Bus {
     fn send_to_watcher(&self, msg: &[u8]) {
         println!("{}->Watcher: {:?}", PARTICIPANTS[self.participant], msg);
-        self.stream.borrow_mut().write(msg).unwrap();
+        self.remote_stream.borrow_mut().write(msg).unwrap();
     }
 
     fn send_to_funder(&self, msg: &[u8]) {
         println!("{}->Funder: {:?}", PARTICIPANTS[self.participant], msg);
-        self.stream.borrow_mut().write(msg).unwrap();
+        self.remote_stream.borrow_mut().write(msg).unwrap();
     }
 
     fn send_to_participants(&self, msg: &[u8]) {
@@ -89,18 +103,17 @@ macro_rules! print_user_interaction {
 fn main() {
     // Some information about the (temporary) blockchain we need, could be hard
     // coded into the application or received by some other means.
-    let mut config_stream = TcpStream::connect("127.0.0.1:1338").unwrap();
+    let mut config_stream = TcpStream::connect("127.0.0.1:1339").unwrap();
     let mut eth_holder = [0u8; 20];
     config_stream.read_exact(&mut eth_holder).unwrap();
     let eth_holder = Address(eth_holder);
     drop(config_stream);
 
     // Networking
-    let stream = TcpStream::connect("127.0.0.1:1337").unwrap();
-    let stream = RefCell::new(stream);
     let bus = Bus {
         participant: 0,
-        stream: stream,
+        stream: RefCell::new(TcpStream::connect("127.0.0.1:1337").unwrap()),
+        remote_stream: RefCell::new(TcpStream::connect("127.0.0.1:1338").unwrap()),
     };
 
     // Signer, Addresses and Client
@@ -160,6 +173,13 @@ fn main() {
     }
 
     print_bold!("Alice: Received all signatures, send to watcher/funder");
+
+    let channel = channel.build().unwrap();
+    // Receive acknowledgements (currently not checked but we have to read them
+    // anyways).
+
+    // bus.recv_message(); // TODO: Uncomment once the Go-side replies
+    // bus.recv_message(); // TODO: Uncomment once the Go-side replies
 
     print_bold!("Alice done");
 }
