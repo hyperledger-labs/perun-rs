@@ -7,9 +7,7 @@ mod signed;
 
 use crate::abiencode::types::{Address, Bytes32, U256};
 pub use active::{LedgerChannelUpdate, LedgerChannelWatchUpdate};
-pub use agreed_upon::{
-    LedgerChannelFundingRequest, LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
-};
+pub use agreed_upon::{LedgerChannelFundingRequest, LedgerChannelUpdateAccepted};
 pub use channel_update::ChannelUpdate;
 use core::fmt::Debug;
 pub use proposal::{LedgerChannelProposal, LedgerChannelProposalAcc, ProposedChannel};

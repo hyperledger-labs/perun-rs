@@ -1,11 +1,14 @@
+mod watch_request;
+
+pub use watch_request::LedgerChannelWatchRequest;
+
 use core::fmt::Debug;
 
 use crate::{
     abiencode::types::Hash,
     channel::{
         LedgerChannelFundingRequest, LedgerChannelProposal, LedgerChannelProposalAcc,
-        LedgerChannelUpdate, LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
-        LedgerChannelWatchUpdate,
+        LedgerChannelUpdate, LedgerChannelUpdateAccepted, LedgerChannelWatchUpdate,
     },
 };
 use alloc::string::String;
