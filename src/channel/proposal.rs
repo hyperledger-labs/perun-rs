@@ -19,6 +19,7 @@ use crate::{
     wire::{MessageBus, ParticipantMessage},
     PerunClient,
 };
+use alloc::string::ToString;
 use alloc::vec;
 use sha3::{Digest, Sha3_256};
 
@@ -246,7 +247,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             .bus
             .send_to_participants(ParticipantMessage::ProposalRejected {
                 id: self.proposal.proposal_id,
-                reason: reason.to_owned(),
+                reason: reason.to_string(),
             });
     }
 

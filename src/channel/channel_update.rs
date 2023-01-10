@@ -6,6 +6,7 @@ use crate::{
     abiencode::{self, types::Signature},
     wire::MessageBus,
 };
+use alloc::string::ToString;
 
 const ASSETS: usize = 1;
 const PARTICIPANTS: usize = 2;
@@ -77,7 +78,7 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
             crate::wire::ParticipantMessage::ChannelUpdateRejected {
                 id: self.channel.channel_id(),
                 version: self.new_state.version(),
-                reason: reason.to_owned(),
+                reason: reason.to_string(),
             },
         );
     }
