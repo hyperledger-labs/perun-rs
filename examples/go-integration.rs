@@ -178,8 +178,8 @@ fn main() {
     // Receive acknowledgements (currently not checked but we have to read them
     // anyways).
 
-    // bus.recv_message(); // TODO: Uncomment once the Go-side replies
-    // bus.recv_message(); // TODO: Uncomment once the Go-side replies
+    bus.recv_message(); // TODO: Uncomment once the Go-side replies
+    bus.recv_message(); // TODO: Uncomment once the Go-side replies
 
     print_bold!("Alice done");
 }
