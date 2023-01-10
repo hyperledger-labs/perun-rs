@@ -1,4 +1,10 @@
 //! Handles the creation and verification of (Ethereum) Signatures.
+//!
+//! The Modules (and their respective dependency) can be enabled/disabled with
+//! the equally named feature flags. [Error][k256::Error] and
+//! [Signer][k256::Signer] are re-exported from the selected Module. If both
+//! feature flags are present, [secp256k1] is used because [k256] is marked as
+//! the default in cargo.toml.
 
 use crate::abiencode::types::Hash;
 use sha3::{Digest, Keccak256};
@@ -9,10 +15,13 @@ mod tests;
 
 // Import the requested implementation(s), as well as the dummy fallback to make
 // sure it always compiles, too, even if the feature flags are set.
+#[doc(hidden)]
 mod dummy;
 #[cfg(feature = "k256")]
+#[cfg_attr(docsrs, doc(cfg(feature = "k256")))]
 pub mod k256;
 #[cfg(feature = "secp256k1")]
+#[cfg_attr(docsrs, doc(cfg(feature = "secp256k1")))]
 pub mod secp256k1;
 
 // Complain if no signing implementation is set, while hiding all the errors
@@ -30,6 +39,7 @@ pub use self::dummy::{Error, Signer};
 #[cfg(all(not(feature = "secp256k1"), feature = "k256"))]
 pub use self::k256::{Error, Signer};
 #[cfg(feature = "secp256k1")]
+#[doc(hidden)]
 pub use self::secp256k1::{Error, Signer};
 
 /// Helper function for the Signers.

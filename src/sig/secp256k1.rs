@@ -1,4 +1,4 @@
-//! Signer using the secp256k1 C-Library. Enabled with the `secp256k1` feature flag.
+//! Signer using the secp256k1 C-Library.
 
 use super::hash_to_eth_signed_msg_hash;
 use crate::abiencode::types::{Address, Hash, Signature};

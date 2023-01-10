@@ -1,3 +1,5 @@
+//! Signer using the k256 Rust crate (implementation of ecdsa in Rust).
+
 use crate::abiencode::types::{Address, Hash, Signature};
 use k256::{
     ecdsa::{
