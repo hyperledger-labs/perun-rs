@@ -1,5 +1,5 @@
 use super::{
-    fixed_size_payment::{self, ConversionError},
+    fixed_size_payment::{self},
     ChannelUpdate, PartID,
 };
 use crate::{
@@ -7,8 +7,9 @@ use crate::{
         self,
         types::{Address, Hash, Signature},
     },
+    messages::{ConversionError, ParticipantMessage, WatcherMessage},
     perunwire, sig,
-    wire::{MessageBus, ParticipantMessage, WatcherMessage},
+    wire::MessageBus,
     PerunClient,
 };
 

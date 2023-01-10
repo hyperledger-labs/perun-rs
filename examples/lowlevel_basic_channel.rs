@@ -5,8 +5,9 @@ use perun::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
         Asset, LedgerChannelProposal,
     },
+    messages::{FunderMessage, ParticipantMessage, WatcherMessage},
     sig::Signer,
-    wire::{FunderMessage, MessageBus, ParticipantMessage, WatcherMessage},
+    wire::MessageBus,
     Hash, PerunClient,
 };
 use std::{fmt::Debug, sync::mpsc};

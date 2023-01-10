@@ -1,6 +1,7 @@
 use crate::channel::{LedgerChannelProposal, ProposedChannel};
+use crate::messages::ParticipantMessage;
 use crate::sig::Signer;
-use crate::wire::{MessageBus, ParticipantMessage};
+use crate::wire::MessageBus;
 use core::fmt::Debug;
 
 // TODO: Add all the verification code (if data is correctly formed)

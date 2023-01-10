@@ -7,7 +7,7 @@
 
 use super::{
     agreed_upon::AgreedUponChannel,
-    fixed_size_payment::{self, ConversionError},
+    fixed_size_payment::{self},
     NonceShare, PartID,
 };
 use crate::{
@@ -15,8 +15,9 @@ use crate::{
         self,
         types::{Address, Bytes32, Hash, U256},
     },
+    messages::{ConversionError, ParticipantMessage},
     perunwire,
-    wire::{MessageBus, ParticipantMessage},
+    wire::MessageBus,
     PerunClient,
 };
 use alloc::string::ToString;

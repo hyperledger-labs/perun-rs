@@ -10,19 +10,11 @@ use crate::{
         self, as_bytes, as_dyn_array,
         types::{Address, Hash, U256},
     },
+    messages::ConversionError,
     perunwire,
 };
 use alloc::vec;
 use serde::Serialize;
-
-#[derive(Debug)]
-pub enum ConversionError {
-    ParticipantSizeMissmatch,
-    AssetSizeMissmatch,
-    ByteLengthMissmatch,
-    ExptectedSome,
-    StateChannelsNotSupported,
-}
 
 /// Parameters for this channel, exchanged during channel proposal and sent
 /// on-chain during a dispute.
