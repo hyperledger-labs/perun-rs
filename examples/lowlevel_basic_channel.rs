@@ -118,8 +118,8 @@ async fn alice(bus: Bus) {
         ParticipantMessage::ProposalAccepted(msg) => {
             channel.participant_accepted(1, msg).unwrap();
         }
-        ParticipantMessage::ProposalRejected => {
-            print_bold!("Alice done: Received ProposalRejected");
+        ParticipantMessage::ProposalRejected { reason, .. } => {
+            print_bold!("Alice done: Received ProposalRejected: {}", reason);
             return;
         }
         _ => panic!("Unexpected message"),
@@ -239,7 +239,7 @@ async fn bob(bus: Bus) {
         channel.accept(rand::random(), addr).unwrap();
     } else {
         print_bold!("Bob done: rejects proposed channel");
-        channel.reject();
+        channel.reject("Bob is configured to not accept the channel");
         return;
     }
 

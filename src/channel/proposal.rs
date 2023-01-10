@@ -241,10 +241,13 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     ///
     /// Drops the ProposedChannel object because using it no longer makes sense,
     /// as we have rejected the proposal.
-    pub fn reject(self) {
+    pub fn reject(self, reason: &str) {
         self.client
             .bus
-            .send_to_participants(ParticipantMessage::ProposalRejected);
+            .send_to_participants(ParticipantMessage::ProposalRejected {
+                id: self.proposal.proposal_id,
+                reason: reason.to_owned(),
+            });
     }
 
     /// Call this when receiving an Accept response form a participant.

@@ -1,7 +1,9 @@
 use prost::{bytes::BufMut, EncodeError};
 
 use super::{BytesBus, FunderMessage, MessageBus, ParticipantMessage, WatcherMessage};
-use crate::perunwire::{envelope, message, AuthResponseMsg, Envelope, Message};
+use crate::perunwire::{
+    envelope, message, AuthResponseMsg, ChannelProposalRejMsg, Envelope, Message,
+};
 use alloc::vec::Vec;
 
 #[derive(Debug)]
@@ -58,11 +60,18 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
     fn send_to_participants(&self, msg: ParticipantMessage) {
         let wiremsg: envelope::Msg = match msg {
             ParticipantMessage::Auth => envelope::Msg::AuthResponseMsg(AuthResponseMsg {}),
-            ParticipantMessage::ChannelProposal(p) => {
-                envelope::Msg::LedgerChannelProposalMsg(p.into())
+            ParticipantMessage::ChannelProposal(msg) => {
+                envelope::Msg::LedgerChannelProposalMsg(msg.into())
             }
-            ParticipantMessage::ProposalAccepted(_) => todo!(),
-            ParticipantMessage::ProposalRejected => todo!(),
+            ParticipantMessage::ProposalAccepted(msg) => {
+                envelope::Msg::LedgerChannelProposalAccMsg(msg.into())
+            }
+            ParticipantMessage::ProposalRejected { id, reason } => {
+                envelope::Msg::ChannelProposalRejMsg(ChannelProposalRejMsg {
+                    proposal_id: id.0.to_vec(),
+                    reason,
+                })
+            }
             ParticipantMessage::ChannelUpdate(_) => todo!(),
             ParticipantMessage::ChannelUpdateAccepted(msg) => {
                 envelope::Msg::ChannelUpdateAccMsg(msg.into())
