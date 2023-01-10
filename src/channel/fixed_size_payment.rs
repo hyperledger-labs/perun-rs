@@ -171,6 +171,8 @@ impl<const A: usize, const P: usize> From<State<A, P>> for perunwire::State {
             id: value.id.0.to_vec(),
             version: value.version,
             allocation: Some(value.outcome.into()),
+            // TODO: We might need to use something special here instead of an
+            // empty vector.
             app: vec![], // Only different if it is a state channel, which we don't support, yet
             data: value.app_data.to_vec(),
             is_final: value.is_final,
