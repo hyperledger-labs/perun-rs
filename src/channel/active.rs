@@ -1,6 +1,7 @@
 use super::{
+    channel_update::ChannelUpdate,
     fixed_size_payment::{self},
-    ChannelUpdate, PartID,
+    PartID,
 };
 use crate::{
     abiencode::{

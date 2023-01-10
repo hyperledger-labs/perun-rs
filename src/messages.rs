@@ -8,8 +8,6 @@ pub use proposal::{LedgerChannelProposal, LedgerChannelProposalAcc};
 pub use update::{LedgerChannelUpdate, LedgerChannelUpdateAccepted};
 pub use watch_request::{LedgerChannelWatchRequest, LedgerChannelWatchUpdate};
 
-use core::fmt::Debug;
-
 use crate::abiencode::types::Hash;
 use alloc::string::String;
 
