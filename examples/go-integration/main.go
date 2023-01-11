@@ -19,6 +19,7 @@ import (
 	ethwallet "github.com/perun-network/perun-eth-backend/wallet"
 	phd "github.com/perun-network/perun-eth-backend/wallet/hd"
 	"github.com/sirupsen/logrus"
+	"perun.network/go-perun/apps/payment"
 	"perun.network/go-perun/channel"
 	"perun.network/go-perun/client"
 	perunlogrus "perun.network/go-perun/log/logrus"
@@ -27,6 +28,8 @@ import (
 	wirenet "perun.network/go-perun/wire/net"
 	"perun.network/go-perun/wire/net/simple"
 	"perun.network/go-perun/wire/protobuf"
+
+	"go-integration/perun-remote"
 )
 
 func ToWei(value int64, denomination string) *big.Int {
@@ -54,6 +57,7 @@ func main() {
 	account := w.GenerateNewAccount()
 	deployer_account := w.GenerateNewAccount()
 	funder_account := w.GenerateNewAccount()
+	funder_account_eth := phd.NewAccountFromEth(w, funder_account)
 
 	// Setup the simulated backend + wrappers around them
 	sb := backends.NewSimulatedBackend(
@@ -71,6 +75,7 @@ func main() {
 		1,
 	)
 
+	channel.RegisterDefaultApp(&payment.Resolver{})
 	go func() {
 		for {
 			sb.Commit()
@@ -142,24 +147,14 @@ func main() {
 	go c.Handle(proposalHandler, updateHandler)
 	go bus.Listen(listener)
 
-	// Dummy listener (used as an endpoint for Watcher+Funder messages while not
-	// implemented)
-	go func() {
-		// Listen for any connection attempt on port 1338 and send out some
-		// information like the ETH holder address. (needed for this example,
-		// we're assuming the application already knows these values (for now
-		// at least))
-		l, err := net.Listen("tcp", "127.0.0.1:1338")
-		if err != nil {
-			panic(err)
-		}
-		for {
-			_, err := l.Accept()
-			if err != nil {
-				panic(err)
-			}
-		}
-	}()
+	server, err := remote.NewServer(
+		remote.NewWatcherService(watcher, adjudicator, funder_account_eth),
+		remote.NewFunderService(funder), 1338)
+	if err != nil {
+		panic(err)
+	}
+	go server.Serve()
+	defer server.Close()
 
 	// Listener for giving the EthHolder address to Rust (only needed for example)
 	go func() {
