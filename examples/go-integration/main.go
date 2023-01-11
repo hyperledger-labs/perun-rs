@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	remote "go-integration/perun-remote"
 	"math/big"
 	"net"
 	"os"
@@ -28,8 +29,6 @@ import (
 	wirenet "perun.network/go-perun/wire/net"
 	"perun.network/go-perun/wire/net/simple"
 	"perun.network/go-perun/wire/protobuf"
-
-	"go-integration/perun-remote"
 )
 
 func ToWei(value int64, denomination string) *big.Int {
@@ -221,4 +220,9 @@ type UpdateHandler struct{}
 // HandleUpdate implements client.UpdateHandler
 func (UpdateHandler) HandleUpdate(state *channel.State, update client.ChannelUpdate, res *client.UpdateResponder) {
 	println("HandleUpdate(): ", state, res)
+
+	err := res.Accept(context.Background())
+	if err != nil {
+		panic(err)
+	}
 }

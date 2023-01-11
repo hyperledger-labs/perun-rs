@@ -8,6 +8,9 @@ mod signed;
 use crate::abiencode::types::{Address, Bytes32, U256};
 use serde::Serialize;
 
+// TODO: Re-export all other types, too
+pub use channel_update::ChannelUpdate;
+
 // Re-exported within this crate because the PerunClient has to be able to
 // create a new ProposedChannel, but the proposal module is private.
 pub(crate) use proposal::ProposedChannel;
