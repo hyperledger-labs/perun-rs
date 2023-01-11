@@ -118,8 +118,8 @@ async fn alice(bus: Bus) {
         ParticipantMessage::ProposalAccepted(msg) => {
             channel.participant_accepted(1, msg).unwrap();
         }
-        ParticipantMessage::ProposalRejected => {
-            print_bold!("Alice done: Received ProposalRejected");
+        ParticipantMessage::ProposalRejected { reason, .. } => {
+            print_bold!("Alice done: Received ProposalRejected: {}", reason);
             return;
         }
         _ => panic!("Unexpected message"),
@@ -185,7 +185,7 @@ async fn alice(bus: Bus) {
                 // service.
                 bus.service_rx.recv().unwrap();
             } else {
-                update.reject();
+                update.reject("Alice configured to reject update");
             }
         }
         _ => panic!("Unexpected Message or channel closure"),
@@ -239,7 +239,7 @@ async fn bob(bus: Bus) {
         channel.accept(rand::random(), addr).unwrap();
     } else {
         print_bold!("Bob done: rejects proposed channel");
-        channel.reject();
+        channel.reject("Bob is configured to not accept the channel");
         return;
     }
 
@@ -349,7 +349,7 @@ async fn bob(bus: Bus) {
                     print_bold!("Bob done: Channel closed normally and the Watcher has the data");
                     return;
                 } else {
-                    update.reject();
+                    update.reject("Bob configured to reject normal close");
                 }
             }
             Ok(_) => panic!("Unexpected message"),

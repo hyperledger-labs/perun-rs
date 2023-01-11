@@ -12,6 +12,7 @@ use crate::{
         LedgerChannelWatchUpdate,
     },
 };
+use alloc::string::String;
 
 pub trait BytesBus: Debug {
     fn send_to_watcher(&self, msg: &[u8]);
@@ -69,8 +70,15 @@ pub enum ParticipantMessage {
     Auth,
     ChannelProposal(LedgerChannelProposal),
     ProposalAccepted(LedgerChannelProposalAcc),
-    ProposalRejected,
+    ProposalRejected {
+        id: Hash,
+        reason: String,
+    },
     ChannelUpdate(LedgerChannelUpdate),
     ChannelUpdateAccepted(LedgerChannelUpdateAccepted),
-    ChannelUpdateRejected { id: Hash },
+    ChannelUpdateRejected {
+        id: Hash,
+        version: u64,
+        reason: String,
+    },
 }

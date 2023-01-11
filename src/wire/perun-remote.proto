@@ -35,7 +35,7 @@ message WatchRequestMsg {
 }
 
 message WatchUpdateMsg {
-    perunwire.State initial_state = 1;
+    perunwire.State state = 1;
     repeated bytes sigs = 2;
 }
 

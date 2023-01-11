@@ -1,7 +1,10 @@
 use prost::{bytes::BufMut, EncodeError};
 
 use super::{BytesBus, FunderMessage, MessageBus, ParticipantMessage, WatcherMessage};
-use crate::perunwire::{envelope, message, AuthResponseMsg, Envelope, Message};
+use crate::perunwire::{
+    envelope, message, AuthResponseMsg, ChannelProposalRejMsg, ChannelUpdateRejMsg, Envelope,
+    Message,
+};
 use alloc::vec::Vec;
 
 #[derive(Debug)]
@@ -32,11 +35,15 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
     fn send_to_watcher(&self, msg: WatcherMessage) {
         let wiremsg: message::Msg = match msg {
             WatcherMessage::WatchRequest(msg) => message::Msg::WatchRequest(msg.into()),
-            WatcherMessage::Update(_) => todo!(),
-            WatcherMessage::Ack { .. } => todo!(),
+            WatcherMessage::Update(msg) => message::Msg::WatchUpdate(msg.into()),
+            WatcherMessage::Ack { .. } => unimplemented!("We only receive this Message Type"),
             WatcherMessage::StartDispute(_) => todo!(),
-            WatcherMessage::DisputeAck { .. } => todo!(),
-            WatcherMessage::DisputeNotification { .. } => todo!(),
+            WatcherMessage::DisputeAck { .. } => {
+                unimplemented!("We only receive this Message Type")
+            }
+            WatcherMessage::DisputeNotification { .. } => {
+                unimplemented!("We only receive this Message Type")
+            }
         };
         let envelope = Message { msg: Some(wiremsg) };
 
@@ -47,7 +54,9 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
     fn send_to_funder(&self, msg: FunderMessage) {
         let wiremsg: message::Msg = match msg {
             FunderMessage::FundingRequest(msg) => message::Msg::FundingRequest(msg.into()),
-            FunderMessage::Funded { .. } => todo!(),
+            FunderMessage::Funded { .. } => {
+                unimplemented!("We only receive this Message Type")
+            }
         };
         let envelope = Message { msg: Some(wiremsg) };
 
@@ -58,16 +67,31 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
     fn send_to_participants(&self, msg: ParticipantMessage) {
         let wiremsg: envelope::Msg = match msg {
             ParticipantMessage::Auth => envelope::Msg::AuthResponseMsg(AuthResponseMsg {}),
-            ParticipantMessage::ChannelProposal(p) => {
-                envelope::Msg::LedgerChannelProposalMsg(p.into())
+            ParticipantMessage::ChannelProposal(msg) => {
+                envelope::Msg::LedgerChannelProposalMsg(msg.into())
             }
-            ParticipantMessage::ProposalAccepted(_) => todo!(),
-            ParticipantMessage::ProposalRejected => todo!(),
-            ParticipantMessage::ChannelUpdate(_) => todo!(),
+            ParticipantMessage::ProposalAccepted(msg) => {
+                envelope::Msg::LedgerChannelProposalAccMsg(msg.into())
+            }
+            ParticipantMessage::ProposalRejected { id, reason } => {
+                envelope::Msg::ChannelProposalRejMsg(ChannelProposalRejMsg {
+                    proposal_id: id.0.to_vec(),
+                    reason,
+                })
+            }
+            ParticipantMessage::ChannelUpdate(msg) => envelope::Msg::ChannelUpdateMsg(msg.into()),
             ParticipantMessage::ChannelUpdateAccepted(msg) => {
                 envelope::Msg::ChannelUpdateAccMsg(msg.into())
             }
-            ParticipantMessage::ChannelUpdateRejected { .. } => todo!(),
+            ParticipantMessage::ChannelUpdateRejected {
+                id,
+                version,
+                reason,
+            } => envelope::Msg::ChannelUpdateRejMsg(ChannelUpdateRejMsg {
+                channel_id: id.0.to_vec(),
+                version,
+                reason,
+            }),
         };
 
         let envelope = Envelope {
