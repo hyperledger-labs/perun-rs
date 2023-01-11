@@ -45,7 +45,7 @@ impl TryFrom<perunwire::WatchRequestMsg> for LedgerChannelWatchRequest {
 impl From<LedgerChannelWatchRequest> for perunwire::WatchRequestMsg {
     fn from(value: LedgerChannelWatchRequest) -> Self {
         Self {
-            participant: 1, // TODO
+            participant: 0, // TODO
             state: Some(perunwire::SignedState {
                 params: Some(value.params.into()),
                 state: Some(value.state.into()),
@@ -89,6 +89,36 @@ impl From<LedgerChannelWatchUpdate> for perunwire::WatchUpdateMsg {
         Self {
             state: Some(value.state.into()),
             sigs: value.signatures.map(|s| s.0.to_vec()).to_vec(),
+        }
+    }
+}
+
+impl TryFrom<perunwire::ForceCloseRequestMsg> for LedgerChannelWatchUpdate {
+    type Error = ConversionError;
+
+    fn try_from(value: perunwire::ForceCloseRequestMsg) -> Result<Self, Self::Error> {
+        let latest = value.latest.ok_or(ConversionError::ExptectedSome)?;
+
+        let mut signatures = [Signature::default(); PARTICIPANTS];
+        for (a, b) in signatures.iter_mut().zip(latest.sigs) {
+            *a = Signature(b.try_into().or(Err(ConversionError::ByteLengthMissmatch))?)
+        }
+
+        Ok(Self {
+            state: latest
+                .state
+                .ok_or(ConversionError::ExptectedSome)?
+                .try_into()?,
+            signatures,
+        })
+    }
+}
+
+impl From<LedgerChannelWatchUpdate> for perunwire::ForceCloseRequestMsg {
+    fn from(value: LedgerChannelWatchUpdate) -> Self {
+        Self {
+            channel_id: value.state.channel_id().0.to_vec(),
+            latest: Some(value.into()),
         }
     }
 }

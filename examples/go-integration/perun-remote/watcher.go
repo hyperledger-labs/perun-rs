@@ -118,17 +118,16 @@ func (service *WatcherService) Update(u WatchUpdateMsg) error {
 	}
 
 	entry.latest.State = &u.InitialState
+	entry.latest.Sigs = u.Sigs
 
 	if entry.latest.State.IsFinal {
-		log.Warn("Final state reached, both sides can now withdraw (not implemented in this integration test")
-		// return service.adj.Withdraw(
-		// 	context.Background(),
-		// 	channel.AdjudicatorReq{
-		// 		Params: &entry.Params,
-		// 		Acc:    service.acc,
-		// 		Tx:     entry.latest,
-		// 		Idx:    entry.Idx},
-		// 	nil)
+		log.Warn("Final state reached, both sides can now withdraw (not implemented in this integration test)")
+		return service.adj.Register(context.Background(), channel.AdjudicatorReq{
+			Params: &entry.Params,
+			Acc:    service.acc,
+			Tx:     entry.latest,
+			Idx:    entry.Idx,
+		}, nil)
 	}
 
 	return nil
@@ -143,7 +142,10 @@ func (service *WatcherService) StartDispute(u ForceCloseRequestMsg) error {
 	}
 
 	if u.Latest != nil {
-		service.Update(*u.Latest)
+		err := service.Update(*u.Latest)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	return service.adj.Register(context.Background(), channel.AdjudicatorReq{

@@ -53,7 +53,7 @@ func main() {
 	perunlogrus.Set(logrus.TraceLevel, &logrus.TextFormatter{})
 
 	w := NewSimpleWallet()
-	account := w.GenerateNewAccount()
+	adjudicator_account := w.GenerateNewAccount()
 	deployer_account := w.GenerateNewAccount()
 	funder_account := w.GenerateNewAccount()
 	funder_account_eth := phd.NewAccountFromEth(w, funder_account)
@@ -61,8 +61,9 @@ func main() {
 	// Setup the simulated backend + wrappers around them
 	sb := backends.NewSimulatedBackend(
 		core.GenesisAlloc{
-			deployer_account.Address: {Balance: ToWei(1_000_000, "ether")},
-			funder_account.Address:   {Balance: ToWei(1_000_000, "ether")},
+			adjudicator_account.Address: {Balance: ToWei(1_000_000, "ether")},
+			deployer_account.Address:    {Balance: ToWei(1_000_000, "ether")},
+			funder_account.Address:      {Balance: ToWei(1_000_000, "ether")},
 		},
 		30_000_000,
 	)
@@ -78,7 +79,7 @@ func main() {
 	go func() {
 		for {
 			sb.Commit()
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(2000 * time.Millisecond)
 		}
 	}()
 
@@ -107,8 +108,8 @@ func main() {
 	adjudicator := ethchannel.NewAdjudicator(
 		cb,
 		adjAddr,
-		account.Address,
-		account,
+		adjudicator_account.Address,
+		adjudicator_account,
 	)
 	perunID := simple.NewAddress("Bob")
 	bus := wirenet.NewBus(

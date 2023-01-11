@@ -17,6 +17,8 @@ use std::{
 };
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
+const NORMAL_CLOSE: bool = true;
+const SEND_DISPUTE: bool = false;
 
 /// Message bus representing a tcp connection. For simplicity only using
 /// [std::sync::mpsc] and printing the data to stdout.
@@ -184,22 +186,24 @@ fn main() {
 
     print_user_interaction!("Alice: Propose Update");
     let mut new_state = channel.state().make_next_state();
-    // Transfer 10 wei (assuming that's the channels currency) from Alice
-    // (channel proposer) to Bob.
-    //
-    // There will be helper functions to do such simple changes and we'll most
-    // likely remove the `.0`.
     new_state.outcome.balances.0[0].0[0] += 10.into();
     new_state.outcome.balances.0[0].0[1] -= 10.into();
     let update = channel.update(new_state).unwrap();
     handle_update_response(&bus, update);
 
-    print_user_interaction!("Alice: Propose Normal close");
-    let mut new_state = channel.state().make_next_state();
-    // Propose a normal closure
-    new_state.is_final = true;
-    let update = channel.update(new_state).unwrap();
-    handle_update_response(&bus, update);
+    if NORMAL_CLOSE {
+        print_user_interaction!("Alice: Propose Normal close");
+        let mut new_state = channel.state().make_next_state();
+        // Propose a normal closure
+        new_state.is_final = true;
+        let update = channel.update(new_state).unwrap();
+        handle_update_response(&bus, update);
+    }
+
+    if SEND_DISPUTE {
+        print_user_interaction!("Alice: Send StartDispute Message (force-close)");
+        channel.force_close()
+    }
 
     print_bold!("Alice done");
 }
