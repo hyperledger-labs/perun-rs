@@ -19,6 +19,7 @@ use crate::{
     wire::{MessageBus, ParticipantMessage},
     PerunClient,
 };
+use alloc::vec;
 use sha3::{Digest, Sha3_256};
 
 const ASSETS: usize = 1;
