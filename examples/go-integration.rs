@@ -118,7 +118,7 @@ fn main() {
 
     // Signer, Addresses and Client
     let signer = Signer::new(&mut rand::thread_rng());
-    let addr = signer.addr;
+    let addr = signer.address();
     let client = PerunClient::new(ProtoBufEncodingLayer { bus: &bus }, signer);
     client.send_handshake_msg();
     bus.recv_envelope();

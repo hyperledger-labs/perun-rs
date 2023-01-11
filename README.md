@@ -10,9 +10,18 @@ Watching the blockchain for disputes and for funding a new channel.
 # Execute all tests
 cargo test --all-features
 
+# Run go-integration example/walkthrough (run in separate terminals)
+cd examples/go-integration; go run . ; cd -
+cargo run --example go-integration
+
 # Run Example/Walkthrough (can be configured at the top with constants)
-cargo run --example lowlevel_basic_channel -F secp256k1
+cargo run --example lowlevel_basic_channel
 
 # Compile without std (the example above requires std)
-cargo build --target thumbv7em-none-eabi --no-default-features
+cargo build --target thumbv7em-none-eabi --no-default-features -F k256
 ```
+
+## Feature Flags
+- `std` (default)
+- `k256` (default) Use [`k256`](https://crates.io/crates/k256) for signatures
+- `secp256k1` Use [`secp256k1`](https://crates.io/crates/secp256k1) for signatures (implies `std`)
