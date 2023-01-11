@@ -63,6 +63,8 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 	defer conn.Close()
 	s.OnCloseAlways(func() { conn.Close() })
 
+	var m sync.Mutex
+
 	for {
 		msg, err := recvMsg(conn)
 		if err != nil {
@@ -82,7 +84,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 				if err = s.watcher.Watch(*req); err != nil {
 					log.Errorf("Watching channel failed: %v", err)
 				}
-				sendMsg(conn, &proto.Message{Msg: &proto.Message_WatchResponse{
+				sendMsg(&m, conn, &proto.Message{Msg: &proto.Message_WatchResponse{
 					WatchResponse: &proto.WatchResponseMsg{
 						ChannelId: req.State.State.ID[:],
 						Version:   req.State.State.Version,
@@ -97,7 +99,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 				if err = s.watcher.Update(*req); err != nil {
 					log.Errorf("Invalid update received: %v", err)
 				}
-				sendMsg(conn, &proto.Message{Msg: &proto.Message_WatchResponse{
+				sendMsg(&m, conn, &proto.Message{Msg: &proto.Message_WatchResponse{
 					WatchResponse: &proto.WatchResponseMsg{
 						ChannelId: req.InitialState.ID[:],
 						Version:   req.InitialState.Version,
@@ -112,7 +114,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 				if err := s.watcher.StartDispute(*req); err != nil {
 					log.Errorf("Disputing failed: %v", err)
 				}
-				sendMsg(conn, &proto.Message{Msg: &proto.Message_ForceCloseResponse{
+				sendMsg(&m, conn, &proto.Message{Msg: &proto.Message_ForceCloseResponse{
 					ForceCloseResponse: &proto.ForceCloseResponseMsg{
 						ChannelId: req.ChannelId[:],
 						Success:   err == nil}}})
@@ -131,7 +133,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 				}); err != nil {
 					log.Errorf("Funding failed: %v", err)
 				}
-				sendMsg(conn, &proto.Message{Msg: &proto.Message_FundingResponse{
+				sendMsg(&m, conn, &proto.Message{Msg: &proto.Message_FundingResponse{
 					FundingResponse: &proto.FundingResponseMsg{
 						ChannelId: req.InitialState.ID[:],
 						Success:   err == nil}}})
@@ -156,7 +158,9 @@ func recvMsg(conn io.Reader) (*proto.Message, error) {
 	return &msg, nil
 }
 
-func sendMsg(conn io.Writer, msg *proto.Message) error {
+func sendMsg(m *sync.Mutex, conn io.Writer, msg *proto.Message) error {
+	m.Lock()
+	defer m.Unlock()
 	data, err := protobuf.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshalling message: %w", err)

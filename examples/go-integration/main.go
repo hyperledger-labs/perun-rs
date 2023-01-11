@@ -154,6 +154,7 @@ func main() {
 		panic(err)
 	}
 	go server.Serve()
+	defer server.Close()
 
 	// Listener for giving the EthHolder address to Rust (only needed for example)
 	go func() {
