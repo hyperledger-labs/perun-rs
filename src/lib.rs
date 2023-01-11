@@ -19,6 +19,7 @@ mod abiencode {
     #[cfg(test)]
     pub mod tests;
 }
+pub mod messages;
 pub mod sig;
 
 pub mod channel;

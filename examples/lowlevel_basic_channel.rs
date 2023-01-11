@@ -3,10 +3,14 @@
 use perun::{
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
-        Asset, LedgerChannelProposal,
+        Asset,
+    },
+    messages::{
+        FunderReplyMessage, FunderRequestMessage, LedgerChannelProposal, ParticipantMessage,
+        WatcherReplyMessage, WatcherRequestMessage,
     },
     sig::Signer,
-    wire::{FunderMessage, MessageBus, ParticipantMessage, WatcherMessage},
+    wire::MessageBus,
     Hash, PerunClient,
 };
 use std::{fmt::Debug, sync::mpsc};
@@ -27,8 +31,10 @@ const ALICE_FORCE_CLOSE: bool = false; // Only relevant if the normal close fail
 /// For simplicity of the communication channels, the Watcher and Funder are
 /// implemented in the same thread in this example.
 enum ServiceMsg {
-    Watcher(WatcherMessage),
-    Funder(FunderMessage),
+    WatcherReq(WatcherRequestMessage),
+    WatcherRepl(WatcherReplyMessage),
+    FunderReq(FunderRequestMessage),
+    FunderRepl(FunderReplyMessage),
     /// Mock of the on-chain Dispute event (used for service->service
     /// communication)
     Dispute {
@@ -50,14 +56,14 @@ struct Bus {
 }
 
 impl MessageBus for &Bus {
-    fn send_to_watcher(&self, msg: WatcherMessage) {
+    fn send_to_watcher(&self, msg: WatcherRequestMessage) {
         println!("{}->Watcher: {:#?}", PARTICIPANTS[self.participant], msg);
-        self.service_tx.send(ServiceMsg::Watcher(msg)).unwrap();
+        self.service_tx.send(ServiceMsg::WatcherReq(msg)).unwrap();
     }
 
-    fn send_to_funder(&self, msg: FunderMessage) {
+    fn send_to_funder(&self, msg: FunderRequestMessage) {
         println!("{}->Funder: {:#?}", PARTICIPANTS[self.participant], msg);
-        self.service_tx.send(ServiceMsg::Funder(msg)).unwrap();
+        self.service_tx.send(ServiceMsg::FunderReq(msg)).unwrap();
     }
 
     fn send_to_participants(&self, msg: ParticipantMessage) {
@@ -378,28 +384,28 @@ async fn service(
 ) {
     loop {
         match rcv.recv() {
-            Ok(ServiceMsg::Watcher(WatcherMessage::WatchRequest(msg))) => {
-                let res = WatcherMessage::Ack {
+            Ok(ServiceMsg::WatcherReq(WatcherRequestMessage::WatchRequest(msg))) => {
+                let res = WatcherReplyMessage::Ack {
                     id: msg.state.channel_id(),
                     version: msg.state.version(),
                 };
                 println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
-                snd.send(ServiceMsg::Watcher(res)).unwrap();
+                snd.send(ServiceMsg::WatcherRepl(res)).unwrap();
             }
-            Ok(ServiceMsg::Watcher(WatcherMessage::Update(msg))) => {
-                let res = WatcherMessage::Ack {
+            Ok(ServiceMsg::WatcherReq(WatcherRequestMessage::Update(msg))) => {
+                let res = WatcherReplyMessage::Ack {
                     id: msg.state.channel_id(),
                     version: msg.state.version(),
                 };
                 println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
-                snd.send(ServiceMsg::Watcher(res)).unwrap();
+                snd.send(ServiceMsg::WatcherRepl(res)).unwrap();
             }
-            Ok(ServiceMsg::Watcher(WatcherMessage::StartDispute(msg))) => {
-                let res = WatcherMessage::DisputeAck {
+            Ok(ServiceMsg::WatcherReq(WatcherRequestMessage::StartDispute(msg))) => {
+                let res = WatcherReplyMessage::DisputeAck {
                     id: msg.state.channel_id(),
                 };
                 println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
-                snd.send(ServiceMsg::Watcher(res)).unwrap();
+                snd.send(ServiceMsg::WatcherRepl(res)).unwrap();
                 // Send through mock blockchain to the participant's service.
                 blockchain_snd
                     .send(ServiceMsg::Dispute {
@@ -407,22 +413,22 @@ async fn service(
                     })
                     .unwrap();
             }
-            Ok(ServiceMsg::Watcher(_)) => panic!("Invalid Message"),
+            Ok(ServiceMsg::WatcherRepl(_)) => panic!("Invalid Message"),
             Ok(ServiceMsg::Dispute { id }) => {
                 // Message received from the mock blockchain, forward the info
                 // to the participant this service is responsible for.
-                let res = WatcherMessage::DisputeNotification { id };
+                let res = WatcherReplyMessage::DisputeNotification { id };
                 println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
-                snd.send(ServiceMsg::Watcher(res)).unwrap();
+                snd.send(ServiceMsg::WatcherRepl(res)).unwrap();
             }
-            Ok(ServiceMsg::Funder(FunderMessage::FundingRequest(msg))) => {
-                let res = FunderMessage::Funded {
+            Ok(ServiceMsg::FunderReq(FunderRequestMessage::FundingRequest(msg))) => {
+                let res = FunderReplyMessage::Funded {
                     id: msg.state.channel_id(),
                 };
                 println!("Funder->{}: {:#?}", PARTICIPANTS[participant], res);
-                snd.send(ServiceMsg::Funder(res)).unwrap();
+                snd.send(ServiceMsg::FunderRepl(res)).unwrap();
             }
-            Ok(ServiceMsg::Funder(_)) => panic!("Invalid Message"),
+            Ok(ServiceMsg::FunderRepl(_)) => panic!("Invalid Message"),
             Ok(ServiceMsg::Stop) => {
                 return;
             }

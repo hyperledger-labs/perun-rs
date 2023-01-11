@@ -1,14 +1,18 @@
 use super::{
-    fixed_size_payment::{self, ConversionError},
-    ChannelUpdate, PartID,
+    channel_update::ChannelUpdate,
+    fixed_size_payment::{self},
+    PartID,
 };
 use crate::{
     abiencode::{
         self,
         types::{Address, Hash, Signature},
     },
-    perunwire, sig,
-    wire::{MessageBus, ParticipantMessage, WatcherMessage},
+    messages::{
+        LedgerChannelUpdate, LedgerChannelWatchUpdate, ParticipantMessage, WatcherRequestMessage,
+    },
+    sig,
+    wire::MessageBus,
     PerunClient,
 };
 
@@ -16,85 +20,6 @@ const ASSETS: usize = 1;
 const PARTICIPANTS: usize = 2;
 type State = fixed_size_payment::State<ASSETS, PARTICIPANTS>;
 type Params = fixed_size_payment::Params<PARTICIPANTS>;
-
-#[derive(Debug, Clone, Copy)]
-pub struct LedgerChannelUpdate {
-    pub state: State,
-    pub actor_idx: PartID,
-    pub sig: Signature,
-}
-
-impl TryFrom<perunwire::ChannelUpdateMsg> for LedgerChannelUpdate {
-    type Error = ConversionError;
-
-    fn try_from(value: perunwire::ChannelUpdateMsg) -> Result<Self, Self::Error> {
-        let update = value.channel_update.ok_or(ConversionError::ExptectedSome)?;
-
-        Ok(Self {
-            state: update
-                .state
-                .ok_or(ConversionError::ExptectedSome)?
-                .try_into()?,
-            actor_idx: update.actor_idx as usize,
-            sig: Signature(
-                value
-                    .sig
-                    .try_into()
-                    .or(Err(ConversionError::ByteLengthMissmatch))?,
-            ),
-        })
-    }
-}
-
-impl From<LedgerChannelUpdate> for perunwire::ChannelUpdateMsg {
-    fn from(value: LedgerChannelUpdate) -> Self {
-        Self {
-            channel_update: Some(perunwire::ChannelUpdate {
-                state: Some(value.state.into()),
-                actor_idx: value.actor_idx as u32,
-            }),
-            sig: value.sig.0.to_vec(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LedgerChannelWatchUpdate {
-    pub state: State,
-    pub signatures: [Signature; PARTICIPANTS],
-}
-
-impl TryFrom<perunwire::WatchUpdateMsg> for LedgerChannelWatchUpdate {
-    type Error = ConversionError;
-
-    fn try_from(value: perunwire::WatchUpdateMsg) -> Result<Self, Self::Error> {
-        if value.sigs.len() != PARTICIPANTS {
-            Err(ConversionError::ParticipantSizeMissmatch)
-        } else {
-            let mut signatures = [Signature::default(); PARTICIPANTS];
-            for (a, b) in signatures.iter_mut().zip(value.sigs) {
-                *a = Signature(b.try_into().or(Err(ConversionError::ByteLengthMissmatch))?)
-            }
-
-            Ok(Self {
-                state: value
-                    .state
-                    .ok_or(ConversionError::ExptectedSome)?
-                    .try_into()?,
-                signatures,
-            })
-        }
-    }
-}
-
-impl From<LedgerChannelWatchUpdate> for perunwire::WatchUpdateMsg {
-    fn from(value: LedgerChannelWatchUpdate) -> Self {
-        Self {
-            state: Some(value.state.into()),
-            sigs: value.signatures.map(|s| s.0.to_vec()).to_vec(),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum ProposeUpdateError {
@@ -222,7 +147,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub fn send_current_state_to_watcher(&self) {
         self.client
             .bus
-            .send_to_watcher(WatcherMessage::Update(LedgerChannelWatchUpdate {
+            .send_to_watcher(WatcherRequestMessage::Update(LedgerChannelWatchUpdate {
                 state: self.state,
                 signatures: self.signatures,
             }))
@@ -243,10 +168,12 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub fn force_close(self) {
         self.client
             .bus
-            .send_to_watcher(WatcherMessage::StartDispute(LedgerChannelWatchUpdate {
-                state: self.state,
-                signatures: self.signatures,
-            }));
+            .send_to_watcher(WatcherRequestMessage::StartDispute(
+                LedgerChannelWatchUpdate {
+                    state: self.state,
+                    signatures: self.signatures,
+                },
+            ));
     }
 
     // At the moment this just drops the channel. In the future it might make

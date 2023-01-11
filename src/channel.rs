@@ -6,14 +6,14 @@ mod proposal;
 mod signed;
 
 use crate::abiencode::types::{Address, Bytes32, U256};
-pub use active::{LedgerChannelUpdate, LedgerChannelWatchUpdate};
-pub use agreed_upon::{
-    LedgerChannelFundingRequest, LedgerChannelUpdateAccepted, LedgerChannelWatchRequest,
-};
-pub use channel_update::ChannelUpdate;
-use core::fmt::Debug;
-pub use proposal::{LedgerChannelProposal, LedgerChannelProposalAcc, ProposedChannel};
 use serde::Serialize;
+
+// Re-exported within this crate because the PerunClient has to be able to
+// create a new ProposedChannel, but the proposal module is private.
+pub(crate) use proposal::ProposedChannel;
+
+// Re-exported because it is part of the low-level channel API
+pub use crate::messages::LedgerChannelProposal;
 
 /// ID (Index) of a participant in the channel.
 ///
