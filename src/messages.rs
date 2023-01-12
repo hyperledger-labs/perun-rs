@@ -6,7 +6,9 @@ mod watch_request;
 pub use funding_request::LedgerChannelFundingRequest;
 pub use proposal::{LedgerChannelProposal, LedgerChannelProposalAcc};
 pub use update::{LedgerChannelUpdate, LedgerChannelUpdateAccepted};
-pub use watch_request::{LedgerChannelWatchRequest, LedgerChannelWatchUpdate};
+pub use watch_request::{
+    LedgerChannelWatchRequest, LedgerChannelWatchUpdate, SignedWithdrawalAuth,
+};
 
 use crate::abiencode::types::Hash;
 use alloc::string::String;

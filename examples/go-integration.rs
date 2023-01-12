@@ -202,7 +202,7 @@ fn main() {
 
     if SEND_DISPUTE {
         print_user_interaction!("Alice: Send StartDispute Message (force-close)");
-        channel.force_close()
+        channel.force_close().unwrap()
     }
 
     print_bold!("Alice done");

@@ -1,15 +1,18 @@
+use serde::Serialize;
+
 use super::{
     channel_update::ChannelUpdate,
     fixed_size_payment::{self},
-    PartID,
+    PartID, SignError,
 };
 use crate::{
     abiencode::{
         self,
-        types::{Address, Hash, Signature},
+        types::{Address, Hash, Signature, U256},
     },
     messages::{
-        LedgerChannelUpdate, LedgerChannelWatchUpdate, ParticipantMessage, WatcherRequestMessage,
+        LedgerChannelUpdate, LedgerChannelWatchUpdate, ParticipantMessage, SignedWithdrawalAuth,
+        WatcherRequestMessage,
     },
     sig,
     wire::MessageBus,
@@ -48,6 +51,14 @@ impl From<sig::Error> for HandleUpdateError {
     fn from(e: sig::Error) -> Self {
         Self::RecoveryFailed(e)
     }
+}
+
+#[derive(Serialize, Debug, Copy, Clone)]
+struct WithdrawalAuth {
+    pub channel_id: Hash,
+    pub participant: Address, // Off-chain channel address
+    pub receiver: Address,    // On-chain receiver of funds on withdrawal
+    pub amount: U256,
 }
 
 #[derive(Debug)]
@@ -138,19 +149,45 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         Ok(ChannelUpdate::new(self, msg.state, msg.actor_idx, msg.sig))
     }
 
-    pub(super) fn force_update(&mut self, new_state: State, signatures: [Signature; PARTICIPANTS]) {
+    pub(super) fn force_update(
+        &mut self,
+        new_state: State,
+        signatures: [Signature; PARTICIPANTS],
+    ) -> Result<(), SignError> {
         self.state = new_state;
         self.signatures = signatures;
-        self.send_current_state_to_watcher();
+        self.send_current_state_to_watcher()
     }
 
-    pub fn send_current_state_to_watcher(&self) {
+    fn make_watch_update(&self) -> Result<LedgerChannelWatchUpdate, SignError> {
+        let receiver = Address::default();
+
+        let mut withdrawal_auths = [SignedWithdrawalAuth::default(); ASSETS];
+        for i in 0..ASSETS {
+            let sig = self
+                .client
+                .signer
+                .sign_eth(abiencode::to_hash(&WithdrawalAuth {
+                    channel_id: self.channel_id(),
+                    participant: self.params.participants[self.part_id],
+                    receiver,
+                    amount: self.state.outcome.balances.0[i].0[self.part_id],
+                })?);
+            withdrawal_auths[i] = SignedWithdrawalAuth { sig, receiver }
+        }
+
+        Ok(LedgerChannelWatchUpdate {
+            state: self.state,
+            signatures: self.signatures,
+            withdrawal_auths,
+        })
+    }
+
+    pub fn send_current_state_to_watcher(&self) -> Result<(), SignError> {
         self.client
             .bus
-            .send_to_watcher(WatcherRequestMessage::Update(LedgerChannelWatchUpdate {
-                state: self.state,
-                signatures: self.signatures,
-            }))
+            .send_to_watcher(WatcherRequestMessage::Update(self.make_watch_update()?));
+        Ok(())
     }
 
     // Use `update()` if the state has to change, too
@@ -165,15 +202,13 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     // At the moment this just drops the channel after sending the message. In
     // the future it might make sense to have a struct representing a closing
     // channel, for example to allow resending the last message.
-    pub fn force_close(self) {
+    pub fn force_close(self) -> Result<(), SignError> {
         self.client
             .bus
             .send_to_watcher(WatcherRequestMessage::StartDispute(
-                LedgerChannelWatchUpdate {
-                    state: self.state,
-                    signatures: self.signatures,
-                },
+                self.make_watch_update()?,
             ));
+        Ok(())
     }
 
     // At the moment this just drops the channel. In the future it might make
