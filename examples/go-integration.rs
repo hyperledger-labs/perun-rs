@@ -1,11 +1,11 @@
 use perun::{
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
-        Asset, LedgerChannelProposal,
+        Asset, ChannelUpdate, LedgerChannelProposal,
     },
     perunwire::{self, envelope},
     sig::Signer,
-    wire::{BytesBus, ProtoBufEncodingLayer},
+    wire::{BytesBus, MessageBus, ProtoBufEncodingLayer},
     Address, PerunClient,
 };
 use prost::Message;
@@ -17,6 +17,8 @@ use std::{
 };
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
+const NORMAL_CLOSE: bool = true;
+const SEND_DISPUTE: bool = false;
 
 /// Message bus representing a tcp connection. For simplicity only using
 /// [std::sync::mpsc] and printing the data to stdout.
@@ -177,9 +179,48 @@ fn main() {
     let channel = channel.build().unwrap();
     // Receive acknowledgements (currently not checked but we have to read them
     // anyways).
+    bus.recv_message();
+    bus.recv_message();
 
-    bus.recv_message(); // TODO: Uncomment once the Go-side replies
-    bus.recv_message(); // TODO: Uncomment once the Go-side replies
+    let mut channel = channel.mark_funded();
+
+    print_user_interaction!("Alice: Propose Update");
+    let mut new_state = channel.state().make_next_state();
+    new_state.outcome.balances.0[0].0[0] += 10.into();
+    new_state.outcome.balances.0[0].0[1] -= 10.into();
+    let update = channel.update(new_state).unwrap();
+    handle_update_response(&bus, update);
+
+    if NORMAL_CLOSE {
+        print_user_interaction!("Alice: Propose Normal close");
+        let mut new_state = channel.state().make_next_state();
+        // Propose a normal closure
+        new_state.is_final = true;
+        let update = channel.update(new_state).unwrap();
+        handle_update_response(&bus, update);
+    }
+
+    if SEND_DISPUTE {
+        print_user_interaction!("Alice: Send StartDispute Message (force-close)");
+        channel.force_close()
+    }
 
     print_bold!("Alice done");
+}
+
+fn handle_update_response<'a, 'b, B: MessageBus>(bus: &Bus, mut update: ChannelUpdate<'a, 'b, B>) {
+    match bus.recv_envelope().msg {
+        Some(envelope::Msg::ChannelUpdateAccMsg(msg)) => {
+            update
+                .participant_accepted(1, msg.try_into().unwrap())
+                .unwrap();
+            update.apply().unwrap();
+        }
+        Some(envelope::Msg::ChannelUpdateRejMsg(_)) => {
+            print_bold!("Aborting update");
+            drop(update);
+        }
+        Some(_) => panic!("Unexpected message"),
+        None => panic!("Envelope did not contain a msg"),
+    }
 }

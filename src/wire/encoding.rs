@@ -39,7 +39,7 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
         let wiremsg: message::Msg = match msg {
             WatcherRequestMessage::WatchRequest(msg) => message::Msg::WatchRequest(msg.into()),
             WatcherRequestMessage::Update(msg) => message::Msg::WatchUpdate(msg.into()),
-            WatcherRequestMessage::StartDispute(_) => todo!(),
+            WatcherRequestMessage::StartDispute(msg) => message::Msg::ForceCloseRequest(msg.into()),
         };
         let envelope = Message { msg: Some(wiremsg) };
 
@@ -54,7 +54,7 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
         let envelope = Message { msg: Some(wiremsg) };
 
         let buf = Self::encode(envelope).unwrap();
-        self.bus.send_to_watcher(&buf);
+        self.bus.send_to_funder(&buf);
     }
 
     fn send_to_participants(&self, msg: ParticipantMessage) {

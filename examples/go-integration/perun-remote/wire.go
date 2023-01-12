@@ -1,10 +1,14 @@
 package remote
 
-import "errors"
-import "perun.network/go-perun/channel"
-import "perun.network/go-perun/wallet"
-import "go-integration/perun-remote/proto"
-import perunProto "perun.network/go-perun/wire/protobuf"
+import (
+	"errors"
+	"go-integration/perun-remote/proto"
+
+	"perun.network/go-perun/channel"
+	"perun.network/go-perun/wallet"
+
+	perunProto "perun.network/go-perun/wire/protobuf"
+)
 
 func verifySigs(sigs []wallet.Sig, state *channel.State, params channel.Params) bool {
 	if len(sigs) != len(params.Parts) {
