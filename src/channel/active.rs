@@ -8,9 +8,7 @@ use crate::{
         self,
         types::{Address, Hash, Signature},
     },
-    messages::{
-        LedgerChannelUpdate, LedgerChannelWatchUpdate, ParticipantMessage, WatcherRequestMessage,
-    },
+    messages::{LedgerChannelUpdate, ParticipantMessage, WatchInfo, WatcherRequestMessage},
     sig,
     wire::MessageBus,
     PerunClient,
@@ -180,7 +178,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         }
     }
 
-    fn make_watch_update(&self) -> Result<LedgerChannelWatchUpdate, SignError> {
+    fn make_watch_info(&self) -> Result<WatchInfo, SignError> {
         let withdrawal_auths = withdrawal_auth::make_signed_withdrawal_auths(
             &self.client.signer,
             self.channel_id(),
@@ -190,7 +188,8 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
             self.part_id,
         )?;
 
-        Ok(LedgerChannelWatchUpdate {
+        Ok(WatchInfo {
+            params: self.params,
             state: self.state,
             signatures: self.signatures,
             withdrawal_auths,
@@ -200,7 +199,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub fn send_current_state_to_watcher(&self) -> Result<(), SignError> {
         self.client
             .bus
-            .send_to_watcher(WatcherRequestMessage::Update(self.make_watch_update()?));
+            .send_to_watcher(WatcherRequestMessage::Update(self.make_watch_info()?));
         Ok(())
     }
 
@@ -219,9 +218,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub fn force_close(self) -> Result<(), SignError> {
         self.client
             .bus
-            .send_to_watcher(WatcherRequestMessage::StartDispute(
-                self.make_watch_update()?,
-            ));
+            .send_to_watcher(WatcherRequestMessage::StartDispute(self.make_watch_info()?));
         Ok(())
     }
 

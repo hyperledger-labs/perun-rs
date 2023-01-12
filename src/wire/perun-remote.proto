@@ -9,11 +9,10 @@ message Message {
         FundingRequestMsg funding_request = 1;
         FundingResponseMsg funding_response = 2;
         WatchRequestMsg watch_request = 3;
-        WatchUpdateMsg watch_update = 4;
-        WatchResponseMsg watch_response = 5;
-        ForceCloseRequestMsg force_close_request = 6;
-        ForceCloseResponseMsg force_close_response = 7;
-        DisputeNotification dispute_notification = 8;
+        WatchResponseMsg watch_response = 4;
+        ForceCloseRequestMsg force_close_request = 5;
+        ForceCloseResponseMsg force_close_response = 6;
+        DisputeNotification dispute_notification = 7;
     }
 }
 
@@ -32,14 +31,6 @@ message FundingResponseMsg {
 message WatchRequestMsg {
     uint32 participant = 1;
     perunwire.SignedState state = 2;
-    // Signatures of the WithdrawalAuths needed for withdrawing assets on-chain
-    // (repeated for each asset_index):
-    repeated SignedWithdrawalAuth withdrawal_auths = 3;
-}
-
-message WatchUpdateMsg {
-    perunwire.State state = 1;
-    repeated bytes sigs = 2;
     // Signatures of the WithdrawalAuths needed for withdrawing assets on-chain
     // (repeated for each asset_index):
     repeated SignedWithdrawalAuth withdrawal_auths = 3;
@@ -72,7 +63,7 @@ message ForceCloseRequestMsg {
     // on Ubuntu: 3.12.4). We could either enable the experimental flag or
     // remove the optional flag. Since the flag doesn't make a real difference
     // here due to the "message" type, I've removed it.
-    WatchUpdateMsg latest = 2;
+    WatchRequestMsg latest = 2;
 }
 
 message ForceCloseResponseMsg {
