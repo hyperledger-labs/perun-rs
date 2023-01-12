@@ -1,4 +1,6 @@
-use super::{active::ActiveChannel, agreed_upon::AddSignatureError, fixed_size_payment, PartID};
+use super::{
+    active::ActiveChannel, agreed_upon::AddSignatureError, fixed_size_payment, PartID, SignError,
+};
 use crate::{
     abiencode::{self, types::Signature},
     messages::{LedgerChannelUpdateAccepted, ParticipantMessage},
@@ -23,8 +25,14 @@ impl From<abiencode::Error> for AcceptError {
 }
 
 #[derive(Debug)]
-pub struct MissingSignatureError {
-    pub part_id: PartID,
+pub enum ApplyError {
+    MissingSignature(PartID),
+    SignError(SignError),
+}
+impl From<SignError> for ApplyError {
+    fn from(e: SignError) -> Self {
+        Self::SignError(e)
+    }
 }
 
 #[derive(Debug)]
@@ -111,18 +119,18 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
         }
     }
 
-    pub fn signatures(&self) -> Result<[Signature; PARTICIPANTS], MissingSignatureError> {
+    fn signatures(&self) -> Result<[Signature; PARTICIPANTS], ApplyError> {
         let mut signatures: [Signature; PARTICIPANTS] = [Signature::default(); PARTICIPANTS];
         for (part_id, s) in self.signatures.iter().enumerate() {
-            signatures[part_id] = s.ok_or(MissingSignatureError { part_id })?;
+            signatures[part_id] = s.ok_or(ApplyError::MissingSignature(part_id))?;
         }
 
         Ok(signatures)
     }
 
-    pub fn apply(self) -> Result<(), MissingSignatureError> {
+    pub fn apply(self) -> Result<(), ApplyError> {
         self.channel
-            .force_update(self.new_state, self.signatures()?);
+            .force_update(self.new_state, self.signatures()?)?;
         Ok(())
     }
 }

@@ -11,7 +11,7 @@ use perun::{
     },
     sig::Signer,
     wire::MessageBus,
-    Hash, PerunClient,
+    Address, Hash, PerunClient,
 };
 use std::{fmt::Debug, sync::mpsc};
 use tokio;
@@ -119,7 +119,11 @@ async fn alice(bus: Bus) {
         participant: addr,
     };
     // Propose new channel and wait for responses
-    let mut channel = client.propose_channel(prop);
+    // withdraw_receiver is the on-chain Address that will receive funds
+    // after withdrawing. The on-chain part is not modelled in this
+    // example => We can set it to anything (random or, as in this case
+    // 0x00)
+    let mut channel = client.propose_channel(prop, Address::default());
     match bus.rx.recv().unwrap() {
         ParticipantMessage::ProposalAccepted(msg) => {
             channel.participant_accepted(1, msg).unwrap();
@@ -221,7 +225,7 @@ async fn alice(bus: Bus) {
     // Bob rejected the normal close
     if ALICE_FORCE_CLOSE && !(ALICE_PROPOSE_NORMAL_CLOSE && BOB_ACCEPTS_NORMAL_CLOSE) {
         print_user_interaction!("Alice starts dispute/force-close because Bob does not cooperate");
-        channel.force_close();
+        channel.force_close().unwrap();
         bus.service_rx.recv().unwrap(); // DisputeAck
         print_bold!("Alice done: Received acknowledgement, so we can forget the channel now");
         return;
@@ -237,7 +241,13 @@ async fn bob(bus: Bus) {
 
     // Wait for Channel Proposal, then accept it
     let mut channel = match bus.rx.recv().unwrap() {
-        ParticipantMessage::ChannelProposal(prop) => client.handle_proposal(prop),
+        ParticipantMessage::ChannelProposal(prop) => {
+            // withdraw_receiver is the on-chain Address that will receive funds
+            // after withdrawing. The on-chain part is not modelled in this
+            // example => We can set it to anything (random or, as in this case
+            // 0x00)
+            client.handle_proposal(prop, Address::default())
+        }
         _ => panic!("Unexpected message"),
     };
     print_user_interaction!("Bob accepts or rejects the proposed channel");
@@ -315,7 +325,7 @@ async fn bob(bus: Bus) {
     // resend the current state whenever you want.
     if BOB_SEND_ADDITIONAL_WATCHER_UPDATE {
         print_bold!("Bob: Send current state to watcher (whenever the application wants)");
-        channel.send_current_state_to_watcher();
+        channel.send_current_state_to_watcher().unwrap();
     }
 
     // When sending two state updates (even with the same content) to the

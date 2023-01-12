@@ -1,7 +1,7 @@
 use super::{
     channel_update::ChannelUpdate,
     fixed_size_payment::{self},
-    PartID,
+    withdrawal_auth, PartID, SignError,
 };
 use crate::{
     abiencode::{
@@ -53,6 +53,7 @@ impl From<sig::Error> for HandleUpdateError {
 #[derive(Debug)]
 pub struct ActiveChannel<'a, B: MessageBus> {
     part_id: PartID,
+    withdraw_receiver: Address,
     client: &'a PerunClient<B>,
     state: State,
     params: Params,
@@ -63,6 +64,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub(super) fn new(
         client: &'cl PerunClient<B>,
         part_id: PartID,
+        withdraw_receiver: Address,
         init_state: State,
         params: Params,
         signatures: [Signature; PARTICIPANTS],
@@ -73,6 +75,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
             state: init_state,
             params,
             signatures,
+            withdraw_receiver,
         }
     }
 
@@ -138,19 +141,67 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         Ok(ChannelUpdate::new(self, msg.state, msg.actor_idx, msg.sig))
     }
 
-    pub(super) fn force_update(&mut self, new_state: State, signatures: [Signature; PARTICIPANTS]) {
+    pub(super) fn force_update(
+        &mut self,
+        new_state: State,
+        signatures: [Signature; PARTICIPANTS],
+    ) -> Result<(), SignError> {
+        // To prevent modifying self (the channel state+signatures) in case
+        // send_current_state_to_watcher returns an Error we roll-back the
+        // changes made here. At the moment this could only happen if we can't
+        // abiencode the WithdrawalAuth message, but in the future this might
+        // include Errors from the MessageBus.
+        //
+        // Alternatives considered:
+        // - Make `make_watch_update` independent of self (associated funciton
+        //   instead of member function). This would mean copying all the
+        //   parameters to its call location (the function existed to not do
+        //   that).
+        // - Copy content of `make_watch_update` here (tried to avoid code
+        //   duplication)
+        // - give only the new state+signatures ot `make_watch_update` instead
+        //   of rolling back. This would make the correctness dependent on
+        //   whether `make_watch_update` uses the state passed via arguments or
+        //   that in self, making it easy to use the wrong one and easy to not
+        //   see that as a bug (especially since all other values are read from
+        //   self) and this one is the exception.
+        let old_state = self.state;
+        let old_sigs = self.signatures;
         self.state = new_state;
         self.signatures = signatures;
-        self.send_current_state_to_watcher();
+
+        match self.send_current_state_to_watcher() {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                self.state = old_state;
+                self.signatures = old_sigs;
+                Err(e)
+            }
+        }
     }
 
-    pub fn send_current_state_to_watcher(&self) {
+    fn make_watch_update(&self) -> Result<LedgerChannelWatchUpdate, SignError> {
+        let withdrawal_auths = withdrawal_auth::make_signed_withdrawal_auths(
+            &self.client.signer,
+            self.channel_id(),
+            self.params,
+            self.state,
+            self.withdraw_receiver,
+            self.part_id,
+        )?;
+
+        Ok(LedgerChannelWatchUpdate {
+            state: self.state,
+            signatures: self.signatures,
+            withdrawal_auths,
+        })
+    }
+
+    pub fn send_current_state_to_watcher(&self) -> Result<(), SignError> {
         self.client
             .bus
-            .send_to_watcher(WatcherRequestMessage::Update(LedgerChannelWatchUpdate {
-                state: self.state,
-                signatures: self.signatures,
-            }))
+            .send_to_watcher(WatcherRequestMessage::Update(self.make_watch_update()?));
+        Ok(())
     }
 
     // Use `update()` if the state has to change, too
@@ -165,15 +216,13 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     // At the moment this just drops the channel after sending the message. In
     // the future it might make sense to have a struct representing a closing
     // channel, for example to allow resending the last message.
-    pub fn force_close(self) {
+    pub fn force_close(self) -> Result<(), SignError> {
         self.client
             .bus
             .send_to_watcher(WatcherRequestMessage::StartDispute(
-                LedgerChannelWatchUpdate {
-                    state: self.state,
-                    signatures: self.signatures,
-                },
+                self.make_watch_update()?,
             ));
+        Ok(())
     }
 
     // At the moment this just drops the channel. In the future it might make

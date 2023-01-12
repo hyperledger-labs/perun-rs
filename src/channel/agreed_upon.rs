@@ -1,6 +1,7 @@
 use super::{
     fixed_size_payment::{self},
     signed::SignedChannel,
+    withdrawal_auth::make_signed_withdrawal_auths,
     PartID,
 };
 use crate::{
@@ -57,11 +58,18 @@ impl From<sig::Error> for AddSignatureError {
 #[derive(Debug)]
 pub enum BuildError {
     MissingSignatureResponse(PartID),
+    AbiEncodeError(abiencode::Error),
+}
+impl From<abiencode::Error> for BuildError {
+    fn from(e: abiencode::Error) -> Self {
+        Self::AbiEncodeError(e)
+    }
 }
 
 #[derive(Debug)]
 pub struct AgreedUponChannel<'a, B: MessageBus> {
     part_id: PartID,
+    withdraw_receiver: Address,
     client: &'a PerunClient<B>,
     funding_agreement: Balances,
     init_state: State,
@@ -74,12 +82,14 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         client: &'a PerunClient<B>,
         funding_agreement: Balances,
         part_id: PartID,
+        withdraw_receiver: Address,
         init_state: State,
         params: Params,
     ) -> Self {
         AgreedUponChannel {
             part_id,
             client,
+            withdraw_receiver,
             funding_agreement,
             init_state,
             params,
@@ -172,6 +182,14 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                     params: self.params,
                     state: self.init_state,
                     signatures: signatures,
+                    withdrawal_auths: make_signed_withdrawal_auths(
+                        &self.client.signer,
+                        self.init_state.channel_id(),
+                        self.params,
+                        self.init_state,
+                        self.withdraw_receiver,
+                        self.part_id,
+                    )?,
                 },
             ));
 
@@ -188,6 +206,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         Ok(SignedChannel::new(
             self.client,
             self.part_id,
+            self.withdraw_receiver,
             self.init_state,
             self.params,
             signatures,

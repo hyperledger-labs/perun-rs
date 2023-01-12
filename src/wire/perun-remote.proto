@@ -32,11 +32,30 @@ message FundingResponseMsg {
 message WatchRequestMsg {
     uint32 participant = 1;
     perunwire.SignedState state = 2;
+    // Signatures of the WithdrawalAuths needed for withdrawing assets on-chain
+    // (repeated for each asset_index):
+    repeated SignedWithdrawalAuth withdrawal_auths = 3;
 }
 
 message WatchUpdateMsg {
     perunwire.State state = 1;
     repeated bytes sigs = 2;
+    // Signatures of the WithdrawalAuths needed for withdrawing assets on-chain
+    // (repeated for each asset_index):
+    repeated SignedWithdrawalAuth withdrawal_auths = 3;
+}
+
+// Data necessary to construct a WithdrawalAuth object for withdrawing funds
+// from the channel. State, Params and the asset_index=index_in_list are
+// additionally needed.
+message SignedWithdrawalAuth {
+    // Content of the on-chain WithdrawalAuth object (Ethereum):
+    //     bytes32 channelID = state.id;
+    //     address participant = params.parts[i];
+    //     address payable receiver; // On-chain address specified by application
+    //     uint256 amount = state.allocation.balances[asset_index].balances[i];
+    bytes sig = 1;
+    bytes receiver = 2;
 }
 
 message WatchResponseMsg {

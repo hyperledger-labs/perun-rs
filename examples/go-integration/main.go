@@ -176,6 +176,10 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
+			_, err = conn.Write(funder_account.Address.Bytes())
+			if err != nil {
+				panic(err)
+			}
 		}
 	}()
 
