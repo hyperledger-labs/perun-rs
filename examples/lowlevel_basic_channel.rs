@@ -11,7 +11,7 @@ use perun::{
     },
     sig::Signer,
     wire::MessageBus,
-    Hash, PerunClient,
+    Address, Hash, PerunClient,
 };
 use std::{fmt::Debug, sync::mpsc};
 use tokio;
@@ -119,7 +119,11 @@ async fn alice(bus: Bus) {
         participant: addr,
     };
     // Propose new channel and wait for responses
-    let mut channel = client.propose_channel(prop);
+    // withdraw_receiver is the on-chain Address that will receive funds
+    // after withdrawing. The on-chain part is not modelled in this
+    // example => We can set it to anything (random or, as in this case
+    // 0x00)
+    let mut channel = client.propose_channel(prop, Address::default());
     match bus.rx.recv().unwrap() {
         ParticipantMessage::ProposalAccepted(msg) => {
             channel.participant_accepted(1, msg).unwrap();
@@ -237,7 +241,13 @@ async fn bob(bus: Bus) {
 
     // Wait for Channel Proposal, then accept it
     let mut channel = match bus.rx.recv().unwrap() {
-        ParticipantMessage::ChannelProposal(prop) => client.handle_proposal(prop),
+        ParticipantMessage::ChannelProposal(prop) => {
+            // withdraw_receiver is the on-chain Address that will receive funds
+            // after withdrawing. The on-chain part is not modelled in this
+            // example => We can set it to anything (random or, as in this case
+            // 0x00)
+            client.handle_proposal(prop, Address::default())
+        }
         _ => panic!("Unexpected message"),
     };
     print_user_interaction!("Bob accepts or rejects the proposed channel");

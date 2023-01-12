@@ -106,9 +106,11 @@ fn main() {
     // Some information about the (temporary) blockchain we need, could be hard
     // coded into the application or received by some other means.
     let mut config_stream = TcpStream::connect("127.0.0.1:1339").unwrap();
-    let mut eth_holder = [0u8; 20];
-    config_stream.read_exact(&mut eth_holder).unwrap();
-    let eth_holder = Address(eth_holder);
+    let mut buf = [0u8; 20];
+    config_stream.read_exact(&mut buf).unwrap();
+    let eth_holder = Address(buf);
+    config_stream.read_exact(&mut buf).unwrap();
+    let withdraw_receiver = Address(buf);
     drop(config_stream);
 
     // Networking
@@ -143,7 +145,7 @@ fn main() {
         participant: addr,
     };
     // Propose new channel and wait for responses
-    let mut channel = client.propose_channel(prop);
+    let mut channel = client.propose_channel(prop, withdraw_receiver);
     match bus.recv_envelope().msg {
         Some(envelope::Msg::LedgerChannelProposalAccMsg(msg)) => channel
             .participant_accepted(1, msg.try_into().unwrap())

@@ -58,6 +58,8 @@ impl From<abiencode::Error> for BuildError {
 pub struct ProposedChannel<'a, B: MessageBus> {
     /// Who are we in this channel (0 is the channel proposer).
     part_id: PartID,
+    /// Who should receive funds when withdrawing
+    withdraw_receiver: Address,
     /// Reference to the PerunClient, used for communication.
     client: &'a PerunClient<B>,
     /// Needed for creating the initial state, Params and for the application to
@@ -79,10 +81,12 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     pub(crate) fn new(
         client: &'a PerunClient<B>,
         part_id: PartID,
+        withdraw_receiver: Address,
         prop: LedgerChannelProposal,
     ) -> Self {
         let c = ProposedChannel {
             part_id: part_id,
+            withdraw_receiver,
             client: client,
             proposal: prop,
             responses: [None],
@@ -205,6 +209,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             self.client,
             self.proposal.funding_agreement,
             self.part_id,
+            self.withdraw_receiver,
             init_state,
             params,
         ))

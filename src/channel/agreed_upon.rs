@@ -62,6 +62,7 @@ pub enum BuildError {
 #[derive(Debug)]
 pub struct AgreedUponChannel<'a, B: MessageBus> {
     part_id: PartID,
+    withdraw_receiver: Address,
     client: &'a PerunClient<B>,
     funding_agreement: Balances,
     init_state: State,
@@ -74,12 +75,14 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         client: &'a PerunClient<B>,
         funding_agreement: Balances,
         part_id: PartID,
+        withdraw_receiver: Address,
         init_state: State,
         params: Params,
     ) -> Self {
         AgreedUponChannel {
             part_id,
             client,
+            withdraw_receiver,
             funding_agreement,
             init_state,
             params,
@@ -188,6 +191,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         Ok(SignedChannel::new(
             self.client,
             self.part_id,
+            self.withdraw_receiver,
             self.init_state,
             self.params,
             signatures,

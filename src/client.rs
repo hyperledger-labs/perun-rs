@@ -2,6 +2,7 @@ use crate::channel::ProposedChannel;
 use crate::messages::{LedgerChannelProposal, ParticipantMessage};
 use crate::sig::Signer;
 use crate::wire::MessageBus;
+use crate::Address;
 use core::fmt::Debug;
 
 // TODO: Add all the verification code (if data is correctly formed)
@@ -33,8 +34,12 @@ impl<B: MessageBus> PerunClient<B> {
 
     /// Propose a new channel with the given parameters/proposal and send a
     /// message to all participants.
-    pub fn propose_channel(&self, prop: LedgerChannelProposal) -> ProposedChannel<B> {
-        let c = ProposedChannel::new(self, 0, prop);
+    pub fn propose_channel(
+        &self,
+        prop: LedgerChannelProposal,
+        withdraw_receiver: Address,
+    ) -> ProposedChannel<B> {
+        let c = ProposedChannel::new(self, 0, withdraw_receiver, prop);
         self.bus
             .send_to_participants(ParticipantMessage::ChannelProposal(prop));
         c
@@ -42,7 +47,11 @@ impl<B: MessageBus> PerunClient<B> {
 
     /// Call this when receiving a proposal message, then call `accept()` or
     /// `reject()` to send the response.
-    pub fn handle_proposal(&self, prop: LedgerChannelProposal) -> ProposedChannel<B> {
-        ProposedChannel::new(self, 1, prop)
+    pub fn handle_proposal(
+        &self,
+        prop: LedgerChannelProposal,
+        withdraw_receiver: Address,
+    ) -> ProposedChannel<B> {
+        ProposedChannel::new(self, 1, withdraw_receiver, prop)
     }
 }
