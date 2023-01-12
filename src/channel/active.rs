@@ -146,9 +146,38 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         new_state: State,
         signatures: [Signature; PARTICIPANTS],
     ) -> Result<(), SignError> {
+        // To prevent modifying self (the channel state+signatures) in case
+        // send_current_state_to_watcher returns an Error we roll-back the
+        // changes made here. At the moment this could only happen if we can't
+        // abiencode the WithdrawalAuth message, but in the future this might
+        // include Errors from the MessageBus.
+        //
+        // Alternatives considered:
+        // - Make `make_watch_update` independent of self (associated funciton
+        //   instead of member function). This would mean copying all the
+        //   parameters to its call location (the function existed to not do
+        //   that).
+        // - Copy content of `make_watch_update` here (tried to avoid code
+        //   duplication)
+        // - give only the new state+signatures ot `make_watch_update` instead
+        //   of rolling back. This would make the correctness dependent on
+        //   whether `make_watch_update` uses the state passed via arguments or
+        //   that in self, making it easy to use the wrong one and easy to not
+        //   see that as a bug (especially since all other values are read from
+        //   self) and this one is the exception.
+        let old_state = self.state;
+        let old_sigs = self.signatures;
         self.state = new_state;
         self.signatures = signatures;
-        self.send_current_state_to_watcher()
+
+        match self.send_current_state_to_watcher() {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                self.state = old_state;
+                self.signatures = old_sigs;
+                Err(e)
+            }
+        }
     }
 
     fn make_watch_update(&self) -> Result<LedgerChannelWatchUpdate, SignError> {
