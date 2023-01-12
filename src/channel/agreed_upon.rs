@@ -1,6 +1,7 @@
 use super::{
     fixed_size_payment::{self},
     signed::SignedChannel,
+    withdrawal_auth::make_signed_withdrawal_auths,
     PartID,
 };
 use crate::{
@@ -57,6 +58,12 @@ impl From<sig::Error> for AddSignatureError {
 #[derive(Debug)]
 pub enum BuildError {
     MissingSignatureResponse(PartID),
+    AbiEncodeError(abiencode::Error),
+}
+impl From<abiencode::Error> for BuildError {
+    fn from(e: abiencode::Error) -> Self {
+        Self::AbiEncodeError(e)
+    }
 }
 
 #[derive(Debug)]
@@ -175,6 +182,14 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                     params: self.params,
                     state: self.init_state,
                     signatures: signatures,
+                    withdrawal_auths: make_signed_withdrawal_auths(
+                        &self.client.signer,
+                        self.init_state.channel_id(),
+                        self.params,
+                        self.init_state,
+                        self.withdraw_receiver,
+                        self.part_id,
+                    )?,
                 },
             ));
 

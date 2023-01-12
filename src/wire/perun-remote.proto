@@ -32,6 +32,9 @@ message FundingResponseMsg {
 message WatchRequestMsg {
     uint32 participant = 1;
     perunwire.SignedState state = 2;
+    // Signatures of the WithdrawalAuths needed for withdrawing assets on-chain
+    // (repeated for each asset_index):
+    repeated SignedWithdrawalAuth withdrawal_auths = 3;
 }
 
 message WatchUpdateMsg {

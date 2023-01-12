@@ -1,18 +1,15 @@
-use serde::Serialize;
-
 use super::{
     channel_update::ChannelUpdate,
     fixed_size_payment::{self},
-    PartID, SignError,
+    withdrawal_auth, PartID, SignError,
 };
 use crate::{
     abiencode::{
         self,
-        types::{Address, Hash, Signature, U256},
+        types::{Address, Hash, Signature},
     },
     messages::{
-        LedgerChannelUpdate, LedgerChannelWatchUpdate, ParticipantMessage, SignedWithdrawalAuth,
-        WatcherRequestMessage,
+        LedgerChannelUpdate, LedgerChannelWatchUpdate, ParticipantMessage, WatcherRequestMessage,
     },
     sig,
     wire::MessageBus,
@@ -51,14 +48,6 @@ impl From<sig::Error> for HandleUpdateError {
     fn from(e: sig::Error) -> Self {
         Self::RecoveryFailed(e)
     }
-}
-
-#[derive(Serialize, Debug, Copy, Clone)]
-struct WithdrawalAuth {
-    pub channel_id: Hash,
-    pub participant: Address, // Off-chain channel address
-    pub receiver: Address,    // On-chain receiver of funds on withdrawal
-    pub amount: U256,
 }
 
 #[derive(Debug)]
@@ -163,22 +152,14 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     }
 
     fn make_watch_update(&self) -> Result<LedgerChannelWatchUpdate, SignError> {
-        let mut withdrawal_auths = [SignedWithdrawalAuth::default(); ASSETS];
-        for i in 0..ASSETS {
-            let sig = self
-                .client
-                .signer
-                .sign_eth(abiencode::to_hash(&WithdrawalAuth {
-                    channel_id: self.channel_id(),
-                    participant: self.params.participants[self.part_id],
-                    receiver: self.withdraw_receiver,
-                    amount: self.state.outcome.balances.0[i].0[self.part_id],
-                })?);
-            withdrawal_auths[i] = SignedWithdrawalAuth {
-                sig,
-                receiver: self.withdraw_receiver,
-            }
-        }
+        let withdrawal_auths = withdrawal_auth::make_signed_withdrawal_auths(
+            &self.client.signer,
+            self.channel_id(),
+            self.params,
+            self.state,
+            self.withdraw_receiver,
+            self.part_id,
+        )?;
 
         Ok(LedgerChannelWatchUpdate {
             state: self.state,

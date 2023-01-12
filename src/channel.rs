@@ -4,6 +4,7 @@ mod channel_update;
 pub mod fixed_size_payment;
 mod proposal;
 mod signed;
+mod withdrawal_auth;
 
 use crate::abiencode::types::{Address, Bytes32, U256};
 use serde::Serialize;
