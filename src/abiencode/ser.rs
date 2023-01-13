@@ -360,11 +360,19 @@ where
     // isn't.
     //
     // This helper function does exactly that to avoid code duplication by
-    // making it easier to execute this behavior.
+    // making it easier to execute this behavior. The "tuple" here refers to
+    // tuples in the abi specs, which are basically structs in Rust. It is also
+    // used in Sequences (Lists).
+    //
+    // Set offset_reduction=0 unless there is something (like the length in
+    // sequences) that has to be written in Pass::Head (and thus has an effect
+    // on the total size of the encoded value), but does not count towards the
+    // offset.
     fn serialize_tuple_element<T: ?Sized>(
         &mut self,
         name: Option<&'static str>,
         value: &T,
+        offset_reduction: usize,
     ) -> Result<()>
     where
         T: Serialize,
@@ -389,13 +397,20 @@ where
             Pass::Head { offset } => {
                 let (field_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
                 if is_dyn && !is_fake_dynamic {
-                    self.write_right_aligned(offset.to_be_bytes());
+                    // The length (only used in Serde Sequences = Solidity dynamic
+                    // length arrays) is part of the Head pass (as it is written
+                    // there), but according to the specs and testing in Solidity it
+                    // is not included when calculating the offset for any dynamic
+                    // fields/elements. Because this is the only difference between
+                    // sequence elements and struct fields the offset_reduction
+                    // param allows using this function for both.
+                    self.write_right_aligned((offset - offset_reduction).to_be_bytes());
                     match name {
                         Some(_name) => {
                             explain!("{} offset (HEAD)", _name);
                         }
                         None => {
-                            explain!("offset (HEAD)");
+                            explain!("element/field offset (HEAD)");
                         }
                     };
 
@@ -404,9 +419,20 @@ where
                     };
                     Ok(())
                 } else {
-                    // TODO: This offset might be wrong, at the moment changing
-                    // it does not cause a test to fail.
-                    self.serialize(&value, Pass::Head { offset: offset })
+                    // The element is not dynamic (nor faked-dynamic) => it does
+                    // not have a tail => It never writes offsets => The value
+                    // for offsets doesn't matter. => We can't test if this is
+                    // correct.
+                    //
+                    // There isn't a good way to detect when it is read either,
+                    // so we just fail as loudly as we can: In debug builds we
+                    // panic due to an integer overflow whenever offset is
+                    // changed and when it is read it will be immediately
+                    // noticable from the output (when printed/examined). In
+                    // release builds this will write hex 0xFFFFFFFFFFFFFFFF as
+                    // the offset, which is unlikely to occur normally (still
+                    // possible as a U256 of course).
+                    self.serialize(&value, Pass::Head { offset: usize::MAX })
                 }
             }
             Pass::TailSize(size) => {
@@ -702,7 +728,7 @@ where
         T: Serialize,
     {
         trace("serialize_newtype_struct", &self.pass);
-        self.serialize_tuple_element(Some(name), value)
+        self.serialize_tuple_element(Some(name), value, 0)
     }
 
     fn serialize_newtype_variant<T: ?Sized>(
@@ -768,7 +794,7 @@ where
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
         trace("serialize_tuple_variant", &self.pass);
-        todo!()
+        Err(Error::TypeNotRepresentable("struct variant"))
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap> {
@@ -798,7 +824,7 @@ where
         T: core::fmt::Display,
     {
         trace("collect_str", &self.pass);
-        todo!()
+        unimplemented!()
     }
 }
 
@@ -817,88 +843,10 @@ where
         T: Serialize,
     {
         trace("Seq: serialize_element", &self.pass);
-        // TODO: Upon closer inspection this looks almost exactly like
-        // serialize_tupler_element, with the only difference that
-        // element_head_size is/should be the same for all values in the
-        // sequence, but this isn't implemented and may be optimized by the
-        // compiler anyways. Replace this by a call to serialize_tuple_element
-        // for code-deduplication with none or a negligible performance cost.
-
-        match self.pass {
-            Pass::HeadSize(ref mut head_size) => {
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                *head_size += if is_dyn && !is_fake_dynamic {
-                    SLOT_SIZE
-                } else {
-                    element_head_size
-                };
-                Ok(())
-            }
-            Pass::Head { offset } => {
-                // For some Ridiculous reason the length of the array is not
-                // part of the offset according to the output of solidity.
-                // TODO: Find out why!
-                let seq_offset = offset - SLOT_SIZE;
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                if is_dyn && !is_fake_dynamic {
-                    self.write_right_aligned(seq_offset.to_be_bytes());
-                    explain!("element offset (HEAD)");
-
-                    self.pass = Pass::Head {
-                        offset: offset + element_head_size + self.get_tail_size(&value)?,
-                    };
-                    Ok(())
-                } else {
-                    // This offset should not matter at all, because the offset
-                    // is never used since (by definition) none of the
-                    // underlying types can be dynamic. Conceptually, this
-                    // should be element_head_size, like in Pass::Tail. It
-                    // indicates the base offset (due to the head size) for all
-                    // offsets in that serializer.
-                    self.serialize(
-                        &value,
-                        Pass::Head {
-                            offset: element_head_size,
-                        },
-                    )
-                }
-            }
-            Pass::TailSize(size) => {
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                let element_tail_size = self.get_tail_size(&value)?;
-                self.pass = Pass::TailSize(
-                    // TODO: Does the element_head_size matter? It should.
-                    size + if is_dyn && !is_fake_dynamic {
-                        element_head_size
-                    } else {
-                        0
-                    } + element_tail_size,
-                );
-                Ok(())
-            }
-            Pass::Tail => {
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                if is_dyn && !is_fake_dynamic {
-                    // This offset might be counter intuitive (I've thought
-                    // about it wrong multiple times). It does NOT have an
-                    // affect on the sequence this element is part of but
-                    // instead on all children of the element. As in the
-                    // to_writer function we have to give the Serializer the
-                    // head size of the value it should serialize, otherwise it
-                    // does not know where the dynamic part (Tail) begins and
-                    // thus cannot write offsets in Pass::Head.
-                    self.serialize(
-                        &value,
-                        Pass::Head {
-                            offset: element_head_size,
-                        },
-                    )?;
-                    self.serialize(&value, Pass::Tail)
-                } else {
-                    Ok(())
-                }
-            }
-        }
+        // The sequence length (written in Pass::Head) is not part of the offset
+        // calculation for sequence elements, see comment inside of
+        // serialize_tuple_element.
+        self.serialize_tuple_element(None, value, SLOT_SIZE)
     }
 
     fn end(self) -> Result<()> {
@@ -920,7 +868,7 @@ where
         T: Serialize,
     {
         trace("Tuple: serialize_element", &self.pass);
-        self.serialize_tuple_element(None, value)
+        self.serialize_tuple_element(None, value, 0)
     }
 
     fn end(self) -> Result<()> {
@@ -942,7 +890,7 @@ where
         T: Serialize,
     {
         trace("TupleStruct: serialize_field", &self.pass);
-        self.serialize_tuple_element(None, value)
+        self.serialize_tuple_element(None, value, 0)
     }
 
     fn end(self) -> Result<()> {
@@ -963,11 +911,11 @@ where
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_tuple_variant never returns Ok")
     }
 
     fn end(self) -> Result<()> {
-        todo!()
+        unreachable!("Because serialize_tuple_variant never returns Ok")
     }
 }
 
@@ -983,18 +931,18 @@ where
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_map never returns Ok")
     }
 
     fn serialize_value<T: ?Sized>(&mut self, _value: &T) -> Result<()>
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_map never returns Ok")
     }
 
     fn end(self) -> Result<()> {
-        todo!()
+        unreachable!("Because serialize_map never returns Ok")
     }
 }
 
@@ -1011,7 +959,7 @@ where
         T: Serialize,
     {
         trace("Struct: serialize_field", &self.pass);
-        self.serialize_tuple_element(Some(name), value)
+        self.serialize_tuple_element(Some(name), value, 0)
     }
 
     fn end(self) -> Result<()> {
@@ -1032,10 +980,10 @@ where
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_struct_variant never returns Ok")
     }
 
     fn end(self) -> Result<()> {
-        todo!()
+        unreachable!("Because serialize_struct_variant never returns Ok")
     }
 }
