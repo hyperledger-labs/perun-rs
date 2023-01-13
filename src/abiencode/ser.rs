@@ -160,6 +160,7 @@ macro_rules! explain {
 /// Helper function to print called methods on the [Serializer].
 ///
 /// Does nothing in a no_std environment or when [DO_TRACE] is `false`.
+#[inline]
 fn trace(_method: &str, _pass: &Pass) {
     #[cfg(feature = "std")]
     if DO_TRACE {
@@ -278,8 +279,6 @@ where
     };
     value.serialize(&mut serializer)?;
 
-    // This can only panic if the serializer changes the pass variable.
-    // TODO: Make sure that this panic cannot happen at compile time.
     if let Pass::HeadSize(head_size) = serializer.pass {
         Ok((head_size, serializer.is_dynamic, serializer.is_fake_dynamic))
     } else {
@@ -332,8 +331,7 @@ where
         Ok(())
     }
 
-    // TODO: Make this independent of self?
-    fn get_tail_size<T>(&self, value: &T) -> Result<usize>
+    fn get_tail_size<T>(value: &T) -> Result<usize>
     where
         T: Serialize,
     {
@@ -345,12 +343,11 @@ where
         };
         value.serialize(&mut serializer)?;
         // This can only panic if the serializer changes the pass variable.
-        // TODO: Make sure that this panic cannot happen at compile time.
         if let Pass::TailSize(tail_size) = serializer.pass {
             Ok(tail_size)
         } else {
             unreachable!(
-                "This should never happen if the serializer does not modify its own pass variable!"
+                "This should never happen because the serializer does not modify its own pass variable variant"
             )
         }
     }
@@ -415,7 +412,7 @@ where
                     };
 
                     self.pass = Pass::Head {
-                        offset: offset + field_head_size + self.get_tail_size(&value)?,
+                        offset: offset + field_head_size + Self::get_tail_size(&value)?,
                     };
                     Ok(())
                 } else {
@@ -437,7 +434,7 @@ where
             }
             Pass::TailSize(size) => {
                 let (field_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                let field_tail_size = self.get_tail_size(&value)?;
+                let field_tail_size = Self::get_tail_size(&value)?;
                 self.pass = Pass::TailSize(
                     size + if is_dyn && !is_fake_dynamic {
                         field_head_size
@@ -658,9 +655,6 @@ where
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
         trace("serialize_bytes", &self.pass);
         match self.pass {
-            // TODO: Make sure we have a test checking if we set the length
-            // correctly if r == 0 (bytes length 32 and 64), which also
-            // tests if writing the remainder works correctly.
             Pass::HeadSize(ref mut head_size) => {
                 let r = v.len() % SLOT_SIZE;
                 //                   size + chunks        + rem
@@ -747,16 +741,6 @@ where
 
     fn serialize_seq(self, size: Option<usize>) -> Result<Self::SerializeSeq> {
         trace("serialize_seq", &self.pass);
-
-        // TODO: Check if the following statement is still true
-        // This Serializer only works if the data type can provide the size in
-        // advance. If this becomes too problematic in the future we could
-        // detect the None case here and write the fields in Pass::Tail. This
-        // has a performance penalty because we need to loop over the fields
-        // twice, but would not panic. On the other hand, sequences that cannot
-        // provide a size in advance are most likely iterators and thus we might
-        // not be able to iterate over the sequence twice.
-
         match self.pass {
             Pass::HeadSize(ref mut head_size) => {
                 self.is_dynamic = true;
@@ -827,8 +811,6 @@ where
         unimplemented!()
     }
 }
-
-// TODO: See what the compiler actually does after optimization.
 
 impl<'a, 'b, W> SerializeSeq for &'a mut Serializer<'b, W>
 where
