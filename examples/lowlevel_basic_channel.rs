@@ -402,14 +402,6 @@ async fn service(
                 println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
                 snd.send(ServiceMsg::WatcherRepl(res)).unwrap();
             }
-            Ok(ServiceMsg::WatcherReq(WatcherRequestMessage::Update(msg))) => {
-                let res = WatcherReplyMessage::Ack {
-                    id: msg.state.channel_id(),
-                    version: msg.state.version(),
-                };
-                println!("Watcher->{}: {:#?}", PARTICIPANTS[participant], res);
-                snd.send(ServiceMsg::WatcherRepl(res)).unwrap();
-            }
             Ok(ServiceMsg::WatcherReq(WatcherRequestMessage::StartDispute(msg))) => {
                 let res = WatcherReplyMessage::DisputeAck {
                     id: msg.state.channel_id(),
