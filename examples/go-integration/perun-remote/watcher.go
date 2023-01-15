@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -17,7 +18,8 @@ type watchEntry struct {
 	Idx    channel.Index
 	watcher.StatesPub
 	watcher.AdjudicatorSub
-	latest channel.Transaction
+	participantAcc wallet.Account // use PreSignedAccount for secure noncustodial signing
+	latest         channel.Transaction
 }
 
 // WatcherService serves a single client, watching and disputing multiple ledger channels.
@@ -27,7 +29,6 @@ type WatcherService struct {
 
 	watching map[channel.ID]*watchEntry
 	adj      channel.Adjudicator
-	acc      wallet.Account
 }
 
 func NewWatcherService(
@@ -38,8 +39,7 @@ func NewWatcherService(
 	return &WatcherService{
 		watch:    watch,
 		watching: make(map[channel.ID]*watchEntry),
-		adj:      adj,
-		acc:      acc}
+		adj:      adj}
 }
 
 func (service *WatcherService) Watch(r WatchRequestMsg) error {
@@ -49,33 +49,68 @@ func (service *WatcherService) Watch(r WatchRequestMsg) error {
 
 	id := r.State.State.ID
 
-	service.mutex.Lock()
-	defer service.mutex.Unlock()
-
-	if _, ok := service.watching[id]; ok {
-		return errors.New("already watched")
+	latestTx := channel.Transaction{
+		State: r.State.State,
+		Sigs:  r.State.Sigs,
 	}
 
-	pub, sub, err := service.watch.StartWatchingLedgerChannel(
-		context.Background(), r.State)
+	// register channel if not tracked, otherwise, update.
+	entry, err := func() (_ *watchEntry, _ error) {
+		service.mutex.Lock()
+		defer service.mutex.Unlock()
+
+		entry, ok := service.watching[id]
+		if ok {
+			if entry.latest.State.Version < entry.latest.State.Version {
+				return nil, errors.New("registered outdated version")
+			}
+
+			entry.latest.State = r.State.State
+			entry.latest.Sigs = r.State.Sigs
+			entry.participantAcc = r.AuthSigner
+			return entry, nil
+		} else {
+			// This should ideally happen in another thread / outside of the master mutex lock, but for now it's alright.
+			pub, sub, err := service.watch.StartWatchingLedgerChannel(
+				context.Background(), r.State)
+			if err != nil {
+				return nil, err
+			}
+			entry = &watchEntry{
+				Params:         *r.State.Params,
+				Idx:            r.Participant,
+				StatesPub:      pub,
+				AdjudicatorSub: sub,
+				participantAcc: r.AuthSigner,
+				latest:         latestTx}
+			service.watching[id] = entry
+
+			go service.watchAndWithdraw(entry)
+			return entry, nil
+		}
+	}()
 	if err != nil {
 		return err
 	}
 
-	latest := channel.Transaction{
-		State: r.State.State,
-		Sigs:  r.State.Sigs,
-	}
-	service.watching[id] = &watchEntry{
-		Params:         *r.State.Params,
-		Idx:            r.Participant,
-		StatesPub:      pub,
-		AdjudicatorSub: sub,
-		latest:         latest}
-
-	err = pub.Publish(context.Background(), latest)
+	err = entry.Publish(context.Background(), latestTx)
 	if err != nil {
 		log.Errorf("Watcher: publishing channel: %v", err)
+	}
+
+	if r.State.State.IsFinal {
+		log.Warn("Final state reached, withdrawing...")
+		err := service.adj.Register(context.Background(), channel.AdjudicatorReq{
+			Params: &entry.Params,
+			Acc:    entry.participantAcc,
+			Tx:     entry.latest,
+			Idx:    entry.Idx,
+		}, nil)
+
+		if err != nil {
+			return fmt.Errorf("Failed to withdraw: %w", err)
+		}
+		log.Warn("Successfully withdrawn!")
 	}
 
 	return nil
@@ -91,46 +126,17 @@ func (service *WatcherService) watchAndWithdraw(e *watchEntry) error {
 		}
 	}
 
-	return service.adj.Withdraw(
-		context.Background(),
-		channel.AdjudicatorReq{
+	req := func() channel.AdjudicatorReq {
+		service.mutex.Lock()
+		defer service.mutex.Unlock()
+		return channel.AdjudicatorReq{
 			Params: &e.Params,
-			Acc:    service.acc,
+			Acc:    e.participantAcc,
 			Tx:     e.latest,
-			Idx:    e.Idx},
-		nil)
-}
+			Idx:    e.Idx}
+	}()
 
-func (service *WatcherService) Update(u WatchUpdateMsg) error {
-	id := u.InitialState.ID
-
-	service.mutex.Lock()
-	defer service.mutex.Unlock()
-
-	entry, ok := service.watching[id]
-	if !ok {
-		log.Errorf("Watcher: updating channel: unregistered channel %v", id)
-		return errors.New("unregistered channel")
-	}
-
-	if err := u.VerifyIntegrity(entry.Params, entry.latest.State.Version); err != nil {
-		return err
-	}
-
-	entry.latest.State = &u.InitialState
-	entry.latest.Sigs = u.Sigs
-
-	if entry.latest.State.IsFinal {
-		log.Warn("Final state reached, both sides can now withdraw (not implemented in this integration test)")
-		return service.adj.Register(context.Background(), channel.AdjudicatorReq{
-			Params: &entry.Params,
-			Acc:    service.acc,
-			Tx:     entry.latest,
-			Idx:    entry.Idx,
-		}, nil)
-	}
-
-	return nil
+	return service.adj.Withdraw(context.Background(), req, nil)
 }
 
 func (service *WatcherService) StartDispute(u ForceCloseRequestMsg) error {
@@ -142,16 +148,25 @@ func (service *WatcherService) StartDispute(u ForceCloseRequestMsg) error {
 	}
 
 	if u.Latest != nil {
-		err := service.Update(*u.Latest)
+		err := service.Watch(*u.Latest)
 		if err != nil {
 			panic(err)
 		}
+		// Do not register twice.
+		if u.Latest.State.State.IsFinal {
+			return nil
+		}
 	}
 
-	return service.adj.Register(context.Background(), channel.AdjudicatorReq{
-		Params: &entry.Params,
-		Acc:    service.acc,
-		Tx:     entry.latest,
-		Idx:    entry.Idx,
-	}, nil)
+	req := func() channel.AdjudicatorReq {
+		service.mutex.Lock()
+		defer service.mutex.Unlock()
+		return channel.AdjudicatorReq{
+			Params: &entry.Params,
+			Acc:    entry.participantAcc,
+			Tx:     entry.latest,
+			Idx:    entry.Idx}
+	}()
+
+	return service.adj.Register(context.Background(), req, nil)
 }

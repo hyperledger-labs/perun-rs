@@ -2,8 +2,13 @@ package remote
 
 import (
 	"errors"
+	"fmt"
+
 	"go-integration/perun-remote/proto"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
+
+	perun_eth_wallet "github.com/perun-network/perun-eth-backend/wallet"
 	"perun.network/go-perun/channel"
 	"perun.network/go-perun/wallet"
 
@@ -33,6 +38,7 @@ func toIdx(i uint32) (channel.Index, error) {
 type WatchRequestMsg struct {
 	Participant channel.Index
 	State       channel.SignedState
+	AuthSigner  wallet.Account
 }
 
 func ParseWatchRequestMsg(p *proto.WatchRequestMsg) (*WatchRequestMsg, error) {
@@ -44,7 +50,46 @@ func ParseWatchRequestMsg(p *proto.WatchRequestMsg) (*WatchRequestMsg, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &WatchRequestMsg{Participant: idx, State: signed}, nil
+
+	if int(idx) > len(signed.Params.Parts) {
+		return nil, errors.New("Invalid participant index")
+	}
+
+	signer := NewPreSignedAccount(signed.Params.Parts[int(idx)])
+
+	var (
+		abiUint256, _ = abi.NewType("uint256", "", nil)
+		abiAddress, _ = abi.NewType("address", "", nil)
+		abiBytes32, _ = abi.NewType("bytes32", "", nil)
+	)
+
+	for i, auth := range p.WithdrawalAuths {
+		args := abi.Arguments{
+			{Type: abiBytes32},
+			{Type: abiAddress},
+			{Type: abiAddress},
+			{Type: abiUint256},
+		}
+		recv := wallet.NewAddress()
+		if err := recv.UnmarshalBinary(auth.Receiver); err != nil {
+			return nil, fmt.Errorf("decoding receiver address: %w", err)
+		}
+		enc, err := args.Pack(
+			signed.State.ID,
+			perun_eth_wallet.AsEthAddr(signer.Address()),
+			perun_eth_wallet.AsEthAddr(recv),
+			signed.State.Allocation.Balances[i][idx])
+		if err != nil {
+			return nil, fmt.Errorf(
+				"ABI encoding withdrawal auths %d: %w", i, err)
+		}
+		signer.AddSig(string(enc), auth.Sig)
+	}
+
+	return &WatchRequestMsg{
+		Participant: idx,
+		State:       signed,
+		AuthSigner:  signer}, nil
 }
 
 func (r WatchRequestMsg) VerifyIntegrity() bool {
@@ -55,47 +100,19 @@ func (r WatchRequestMsg) VerifyIntegrity() bool {
 	return verifySigs(r.State.Sigs, r.State.State, *r.State.Params)
 }
 
-type WatchUpdateMsg struct {
-	InitialState channel.State
-	Sigs         []wallet.Sig
-}
-
-func ParseWatchUpdateMsg(p *proto.WatchUpdateMsg) (*WatchUpdateMsg, error) {
-	state, err := perunProto.ToState(p.InitialState)
-	if err != nil {
-		return nil, err
-	}
-	return &WatchUpdateMsg{InitialState: *state, Sigs: p.Sigs}, nil
-}
-
-func (u *WatchUpdateMsg) VerifyIntegrity(params channel.Params, version uint64) error {
-	if u.InitialState.ID != params.ID() {
-		return errors.New("invalid channel ID")
-	}
-
-	if u.InitialState.Version < version {
-		return errors.New("outdated version")
-	}
-
-	if !verifySigs(u.Sigs, &u.InitialState, params) {
-		return errors.New("invalid signatures")
-	}
-	return nil
-}
-
 type ForceCloseRequestMsg struct {
 	ChannelId channel.ID
-	Latest    *WatchUpdateMsg
+	Latest    *WatchRequestMsg
 }
 
 func ParseForceCloseRequestMsg(p *proto.ForceCloseRequestMsg) (*ForceCloseRequestMsg, error) {
 	var id channel.ID
 	copy(id[:], p.ChannelId)
 
-	var latest *WatchUpdateMsg
+	var latest *WatchRequestMsg
 	if p.Latest != nil {
 		var err error
-		if latest, err = ParseWatchUpdateMsg(p.Latest); err != nil {
+		if latest, err = ParseWatchRequestMsg(p.Latest); err != nil {
 			return nil, err
 		}
 	}
