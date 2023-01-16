@@ -189,6 +189,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         )?;
 
         Ok(WatchInfo {
+            part_id: self.part_id,
             params: self.params,
             state: self.state,
             signatures: self.signatures,

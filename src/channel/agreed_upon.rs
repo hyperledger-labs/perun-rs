@@ -178,6 +178,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         self.client
             .bus
             .send_to_watcher(WatcherRequestMessage::WatchRequest(WatchInfo {
+                part_id: self.part_id,
                 params: self.params,
                 state: self.init_state,
                 signatures: signatures,
@@ -195,6 +196,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             .bus
             .send_to_funder(FunderRequestMessage::FundingRequest(
                 LedgerChannelFundingRequest {
+                    part_id: self.part_id,
                     funding_agreement: self.funding_agreement,
                     params: self.params,
                     state: self.init_state,
