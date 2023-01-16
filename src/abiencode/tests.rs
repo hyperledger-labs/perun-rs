@@ -196,6 +196,3 @@ impl Bytes for BytesViaNormalAttr {
         }
     }
 }
-
-// TODO: Various variants mixed
-// TODO: Some arrays with more elements, some with zero

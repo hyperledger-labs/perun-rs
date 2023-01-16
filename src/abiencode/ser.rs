@@ -387,8 +387,6 @@ where
                 let (element_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
                 // Unfortunately we can't use mutable references in the match
                 // statement because compute_size requires a reference, too.
-                // TODO: Make compute_size not use self or value and ideally
-                // compute it at compile time.
 
                 *size += if is_dyn && !is_fake_dynamic {
                     SLOT_SIZE
