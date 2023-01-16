@@ -139,11 +139,16 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
 
         // Verify signature is comming from a valid participant.
         //
-        // TODO: There is currently a difference to go-perun, which gets the
+        // There is currently a difference to go-perun, which gets the
         // participant index by comparing `wire.Address`-es instead of ephemeral
         // `wallet.Address`-es, then compares only against one `wallet.Address`.
         // As long as both are unique this doesn't make a difference (not even
-        // in performance).
+        // in performance). This means that channels where multiple participants
+        // have the same channel key would be problematic in Rust, while it
+        // would be perfectly fine in Go (except that it wouldn't be a good idea
+        // to do that). On the other side, Rust would allow multiple
+        // participants with the same wire identity (which doesn't really make
+        // sense either).
         let part_id: PartID = match self
             .params
             .participants
