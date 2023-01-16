@@ -638,10 +638,6 @@ where
                 // Calculate the amount of slots the dynamic part needs to
                 // forward the offset. The length is in bytes.
                 let r = v.len() % SLOT_SIZE;
-                // TODO: Make sure we have a test checking if we set the length
-                // correctly if r == 0 (string length 32 and 64), which also
-                // tests if writing the remainder works correctly.
-                //
                 //                        length + chunks        + rem
                 let tail_size = SLOT_SIZE + (v.len() - r) + (if r == 0 { 0 } else { SLOT_SIZE });
 
@@ -656,7 +652,9 @@ where
                 for chunk in iter {
                     self.writer.write(chunk);
                 }
-                self.write_left_aligned_slice(rem);
+                if rem.len() > 0 {
+                    self.write_left_aligned_slice(rem);
+                }
             }
         };
         Ok(())
