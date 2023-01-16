@@ -1,7 +1,7 @@
 mod encoding;
 
+use alloc::vec::Vec;
 use core::fmt::Debug;
-
 pub use encoding::ProtoBufEncodingLayer;
 
 use crate::{
