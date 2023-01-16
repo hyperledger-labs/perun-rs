@@ -83,7 +83,7 @@ func ParseWatchRequestMsg(p *proto.WatchRequestMsg) (*WatchRequestMsg, error) {
 			return nil, fmt.Errorf(
 				"ABI encoding withdrawal auths %d: %w", i, err)
 		}
-		signer.AddSig(string(enc), auth.Sig)
+		signer.AddSig(enc, auth.Sig)
 	}
 
 	return &WatchRequestMsg{

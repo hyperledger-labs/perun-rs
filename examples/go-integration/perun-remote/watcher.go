@@ -34,7 +34,6 @@ type WatcherService struct {
 func NewWatcherService(
 	watch watcher.Watcher,
 	adj channel.Adjudicator,
-	acc wallet.Account,
 ) *WatcherService {
 	return &WatcherService{
 		watch:    watch,
@@ -61,7 +60,7 @@ func (service *WatcherService) Watch(r WatchRequestMsg) error {
 
 		entry, ok := service.watching[id]
 		if ok {
-			if entry.latest.State.Version < entry.latest.State.Version {
+			if r.State.State.Version < entry.latest.State.Version {
 				return nil, errors.New("registered outdated version")
 			}
 
@@ -118,11 +117,15 @@ func (service *WatcherService) Watch(r WatchRequestMsg) error {
 
 func (service *WatcherService) watchAndWithdraw(e *watchEntry) error {
 	defer service.watch.StopWatching(context.Background(), e.Params.ID())
+	defer log.Warnln("watchAndWithdraw returns.")
 	for evt := range e.EventStream() {
 		if _, ok := evt.(*channel.ConcludedEvent); ok {
 			break
 		} else {
-			evt.Timeout().Wait(context.Background())
+			log.Warnf("Awaiting timout on adjudicator event: %T", evt)
+			log.Warnf("Wait: %v", evt.Timeout().Wait(context.Background()))
+			log.Warnf("Timeout %T elapsed", evt)
+			break
 		}
 	}
 
@@ -136,7 +139,14 @@ func (service *WatcherService) watchAndWithdraw(e *watchEntry) error {
 			Idx:    e.Idx}
 	}()
 
-	return service.adj.Withdraw(context.Background(), req, nil)
+	log.Warnln("Channel concluded on-chain! withdrawing...")
+	err := service.adj.Withdraw(context.Background(), req, nil)
+
+	if err != nil {
+		log.Errorf("Failed to withdraw: %v", err)
+	}
+	log.Warn("Successfully withdrawn!")
+	return nil
 }
 
 func (service *WatcherService) StartDispute(u ForceCloseRequestMsg) error {
@@ -168,5 +178,12 @@ func (service *WatcherService) StartDispute(u ForceCloseRequestMsg) error {
 			Idx:    entry.Idx}
 	}()
 
-	return service.adj.Register(context.Background(), req, nil)
+	log.Warnln("Registering state for dispute...")
+	err := service.adj.Register(context.Background(), req, nil)
+
+	if err != nil {
+		return fmt.Errorf("Failed to dispute: %w", err)
+	}
+	log.Warn("Successfully registered!")
+	return nil
 }

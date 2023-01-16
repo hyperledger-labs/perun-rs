@@ -3,7 +3,6 @@ package remote
 import (
 	"errors"
 
-	"github.com/ethereum/go-ethereum/crypto"
 	"perun.network/go-perun/wallet"
 )
 
@@ -23,14 +22,12 @@ func NewPreSignedAccount(addr wallet.Address) *PreSignedAccount {
 
 func (p PreSignedAccount) Address() wallet.Address { return p.address }
 
-func (p *PreSignedAccount) AddSig(msgHash string, sig wallet.Sig) {
-	p.signatures[msgHash] = sig
+func (p *PreSignedAccount) AddSig(message []byte, sig wallet.Sig) {
+	p.signatures[string(message)] = sig
 }
 
-func (p *PreSignedAccount) SignData(data []byte) ([]byte, error) {
-	hash := crypto.Keccak256(data)
-
-	if sig, ok := p.signatures[string(hash[:])]; ok {
+func (p *PreSignedAccount) SignData(message []byte) ([]byte, error) {
+	if sig, ok := p.signatures[string(message)]; ok {
 		return sig, nil
 	}
 

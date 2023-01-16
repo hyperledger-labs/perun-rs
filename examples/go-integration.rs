@@ -17,8 +17,8 @@ use std::{
 };
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
-const NORMAL_CLOSE: bool = true;
-const SEND_DISPUTE: bool = false;
+const NORMAL_CLOSE: bool = false;
+const SEND_DISPUTE: bool = true;
 
 /// Message bus representing a tcp connection. For simplicity only using
 /// [std::sync::mpsc] and printing the data to stdout.
@@ -132,7 +132,7 @@ fn main() {
     let init_balance = Balances([ParticipantBalances([100.into(), 100.into()])]);
     let prop = LedgerChannelProposal {
         proposal_id: rand::random(),
-        challenge_duration: 100,
+        challenge_duration: 25,
         nonce_share: rand::random(),
         init_bals: Allocation::new(
             [Asset {
@@ -204,7 +204,8 @@ fn main() {
 
     if SEND_DISPUTE {
         print_user_interaction!("Alice: Send StartDispute Message (force-close)");
-        channel.force_close().unwrap()
+        channel.force_close().unwrap();
+        bus.recv_message();
     }
 
     print_bold!("Alice done");
