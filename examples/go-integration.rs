@@ -5,7 +5,7 @@ use perun::{
     },
     perunwire::{self, envelope},
     sig::Signer,
-    wire::{BytesBus, MessageBus, ProtoBufEncodingLayer},
+    wire::{BytesBus, Identity, MessageBus, ProtoBufEncodingLayer},
     Address, PerunClient,
 };
 use prost::Message;
@@ -74,7 +74,7 @@ impl BytesBus for &Bus {
         self.remote_stream.borrow_mut().write(msg).unwrap();
     }
 
-    fn send_to_participants(&self, msg: &[u8]) {
+    fn send_to_participant(&self, _: &Identity, _: &Identity, msg: &[u8]) {
         println!(
             "{}->{}: {:?}",
             PARTICIPANTS[self.participant],
@@ -121,11 +121,13 @@ fn main() {
         remote_stream: RefCell::new(TcpStream::connect("127.0.0.1:1338").unwrap()),
     };
 
+    let peers = vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()];
+
     // Signer, Addresses and Client
     let signer = Signer::new(&mut rand::thread_rng());
     let addr = signer.address();
     let client = PerunClient::new(ProtoBufEncodingLayer { bus: &bus }, signer);
-    client.send_handshake_msg();
+    client.send_handshake_msg(&peers[0], &peers[1]);
     bus.recv_envelope();
 
     // Create channel proposal (user configuration)
@@ -144,7 +146,7 @@ fn main() {
         ),
         funding_agreement: init_balance,
         participant: addr,
-        peers: vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()],
+        peers,
     };
     // Propose new channel and wait for responses
     let mut channel = client.propose_channel(prop, withdraw_receiver);

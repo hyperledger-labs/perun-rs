@@ -1,6 +1,6 @@
 use prost::{bytes::BufMut, EncodeError};
 
-use super::{BytesBus, MessageBus, ParticipantMessage};
+use super::{BytesBus, Identity, MessageBus, ParticipantMessage};
 use crate::{
     messages::{FunderRequestMessage, WatcherRequestMessage},
     perunwire::{
@@ -56,7 +56,12 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
         self.bus.send_to_funder(&buf);
     }
 
-    fn send_to_participants(&self, msg: ParticipantMessage) {
+    fn send_to_participant(
+        &self,
+        sender: &Identity,
+        recipient: &Identity,
+        msg: ParticipantMessage,
+    ) {
         let wiremsg: envelope::Msg = match msg {
             ParticipantMessage::Auth => envelope::Msg::AuthResponseMsg(AuthResponseMsg {}),
             ParticipantMessage::ChannelProposal(msg) => {
@@ -87,12 +92,12 @@ impl<B: BytesBus> MessageBus for ProtoBufEncodingLayer<B> {
         };
 
         let envelope = Envelope {
-            sender: "Alice".as_bytes().to_vec(),  // TODO
-            recipient: "Bob".as_bytes().to_vec(), // TODO
+            sender: sender.clone(),
+            recipient: recipient.clone(),
             msg: Some(wiremsg),
         };
 
         let buf = Self::encode(envelope).unwrap();
-        self.bus.send_to_participants(&buf);
+        self.bus.send_to_participant(sender, recipient, &buf);
     }
 }

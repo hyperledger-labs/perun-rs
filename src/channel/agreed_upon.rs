@@ -2,7 +2,7 @@ use super::{
     fixed_size_payment::{self},
     signed::SignedChannel,
     withdrawal_auth::make_signed_withdrawal_auths,
-    PartID,
+    PartID, Peers,
 };
 use crate::{
     abiencode::{
@@ -14,7 +14,7 @@ use crate::{
         ParticipantMessage, WatchInfo, WatcherRequestMessage,
     },
     sig,
-    wire::MessageBus,
+    wire::{BroadcastMessageBus, MessageBus},
     PerunClient,
 };
 
@@ -75,6 +75,7 @@ pub struct AgreedUponChannel<'a, B: MessageBus> {
     init_state: State,
     params: Params,
     signatures: [Option<Signature>; 2],
+    peers: Peers,
 }
 
 impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
@@ -85,6 +86,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         withdraw_receiver: Address,
         init_state: State,
         params: Params,
+        peers: Peers,
     ) -> Self {
         AgreedUponChannel {
             part_id,
@@ -94,6 +96,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             init_state,
             params,
             signatures: [None; PARTICIPANTS],
+            peers,
         }
     }
 
@@ -107,15 +110,15 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                 // Add signature to the proposed channel
                 self.signatures[self.part_id] = Some(sig);
                 // Send to other participants
-                self.client
-                    .bus
-                    .send_to_participants(ParticipantMessage::ChannelUpdateAccepted(
-                        LedgerChannelUpdateAccepted {
-                            channel: self.init_state.channel_id(),
-                            version: self.init_state.version(),
-                            sig: sig,
-                        },
-                    ));
+                self.client.bus.broadcast_to_participants(
+                    self.part_id,
+                    &self.peers,
+                    ParticipantMessage::ChannelUpdateAccepted(LedgerChannelUpdateAccepted {
+                        channel: self.init_state.channel_id(),
+                        version: self.init_state.version(),
+                        sig: sig,
+                    }),
+                );
                 Ok(())
             }
         }
@@ -215,6 +218,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             self.init_state,
             self.params,
             signatures,
+            self.peers,
         ))
     }
 }

@@ -4,7 +4,7 @@ use super::{
 use crate::{
     abiencode::{self, types::Signature},
     messages::{LedgerChannelUpdateAccepted, ParticipantMessage},
-    wire::MessageBus,
+    wire::{BroadcastMessageBus, MessageBus},
 };
 use alloc::string::ToString;
 
@@ -71,24 +71,26 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
                     sig: sig,
                 };
                 self.signatures[self.channel.part_id()] = Some(sig);
-                self.channel
-                    .client()
-                    .bus
-                    .send_to_participants(ParticipantMessage::ChannelUpdateAccepted(acc));
+                self.channel.client().bus.broadcast_to_participants(
+                    self.channel.part_id(),
+                    self.channel.peers(),
+                    ParticipantMessage::ChannelUpdateAccepted(acc),
+                );
                 Ok(())
             }
         }
     }
 
     pub fn reject(self, reason: &str) {
-        self.channel
-            .client()
-            .bus
-            .send_to_participants(ParticipantMessage::ChannelUpdateRejected {
+        self.channel.client().bus.broadcast_to_participants(
+            self.channel.part_id(),
+            self.channel.peers(),
+            ParticipantMessage::ChannelUpdateRejected {
                 id: self.channel.channel_id(),
                 version: self.new_state.version(),
                 reason: reason.to_string(),
-            });
+            },
+        );
     }
 
     pub fn participant_accepted(

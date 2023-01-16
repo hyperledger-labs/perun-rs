@@ -1,7 +1,7 @@
 use super::{
     channel_update::ChannelUpdate,
     fixed_size_payment::{self},
-    withdrawal_auth, PartID, SignError,
+    withdrawal_auth, PartID, Peers, SignError,
 };
 use crate::{
     abiencode::{
@@ -10,7 +10,7 @@ use crate::{
     },
     messages::{LedgerChannelUpdate, ParticipantMessage, WatchInfo, WatcherRequestMessage},
     sig,
-    wire::MessageBus,
+    wire::{BroadcastMessageBus, MessageBus},
     PerunClient,
 };
 
@@ -56,6 +56,7 @@ pub struct ActiveChannel<'a, B: MessageBus> {
     state: State,
     params: Params,
     signatures: [Signature; PARTICIPANTS],
+    peers: Peers,
 }
 
 impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
@@ -66,6 +67,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         init_state: State,
         params: Params,
         signatures: [Signature; PARTICIPANTS],
+        peers: Peers,
     ) -> Self {
         ActiveChannel {
             part_id,
@@ -74,6 +76,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
             params,
             signatures,
             withdraw_receiver,
+            peers,
         }
     }
 
@@ -93,6 +96,10 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         self.client
     }
 
+    pub fn peers(&self) -> &Peers {
+        &self.peers
+    }
+
     pub fn params(&self) -> Params {
         self.params
     }
@@ -107,13 +114,15 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         // Sign immediately, we need the signature to send the proposal.
         let hash = abiencode::to_hash(&new_state)?;
         let sig = self.client.signer.sign_eth(hash);
-        self.client
-            .bus
-            .send_to_participants(ParticipantMessage::ChannelUpdate(LedgerChannelUpdate {
+        self.client.bus.broadcast_to_participants(
+            self.part_id,
+            &self.peers,
+            ParticipantMessage::ChannelUpdate(LedgerChannelUpdate {
                 state: new_state,
                 actor_idx: self.part_id,
                 sig,
-            }));
+            }),
+        );
 
         Ok(ChannelUpdate::new(self, new_state, self.part_id, sig))
     }

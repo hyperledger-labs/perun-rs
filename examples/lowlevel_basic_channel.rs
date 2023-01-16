@@ -10,7 +10,7 @@ use perun::{
         WatcherReplyMessage, WatcherRequestMessage,
     },
     sig::Signer,
-    wire::MessageBus,
+    wire::{Identity, MessageBus},
     Address, Hash, PerunClient,
 };
 use std::{fmt::Debug, sync::mpsc};
@@ -66,7 +66,7 @@ impl MessageBus for &Bus {
         self.service_tx.send(ServiceMsg::FunderReq(msg)).unwrap();
     }
 
-    fn send_to_participants(&self, msg: ParticipantMessage) {
+    fn send_to_participant(&self, _: &Identity, _: &Identity, msg: ParticipantMessage) {
         println!(
             "{}->{}: {:#?}",
             PARTICIPANTS[self.participant],
