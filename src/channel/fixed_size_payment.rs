@@ -135,7 +135,7 @@ impl<const A: usize, const P: usize> TryFrom<perunwire::State> for State<A, P> {
     type Error = ConversionError;
 
     fn try_from(value: perunwire::State) -> Result<Self, Self::Error> {
-        if value.data.len() != 0 {
+        if !value.data.is_empty() {
             return Err(ConversionError::StateChannelsNotSupported);
         }
 

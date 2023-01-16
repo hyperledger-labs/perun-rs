@@ -68,7 +68,7 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
                 let acc: _ = LedgerChannelUpdateAccepted {
                     channel: self.channel.channel_id(),
                     version: self.new_state.version(),
-                    sig: sig,
+                    sig,
                 };
                 self.signatures[self.channel.part_id()] = Some(sig);
                 self.channel.client().bus.broadcast_to_participants(

@@ -45,7 +45,7 @@ impl<'a> Serialize for Bytes<'a> {
     }
 }
 
-pub fn serialize<'a, S>(
+pub fn serialize<S>(
     v: &[u8],
     serializer: S,
 ) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error>

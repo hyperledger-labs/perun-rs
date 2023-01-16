@@ -31,14 +31,18 @@ pub fn make_signed_withdrawal_auths(
     part_id: PartID,
 ) -> Result<[SignedWithdrawalAuth; ASSETS], abiencode::Error> {
     let mut withdrawal_auths = [SignedWithdrawalAuth::default(); ASSETS];
-    for i in 0..ASSETS {
+
+    // Just a defensive measure in case the State type is changed without
+    // removing or updating ASSETS.
+    debug_assert_eq!(withdrawal_auths.len(), state.outcome.balances.0.len());
+    for (auth, bals) in withdrawal_auths.iter_mut().zip(state.outcome.balances.0) {
         let sig = signer.sign_eth(abiencode::to_hash(&WithdrawalAuth {
-            channel_id: channel_id,
+            channel_id,
             participant: params.participants[part_id],
             receiver: withdraw_receiver,
-            amount: state.outcome.balances.0[i].0[part_id],
+            amount: bals.0[part_id],
         })?);
-        withdrawal_auths[i] = SignedWithdrawalAuth {
+        *auth = SignedWithdrawalAuth {
             sig,
             receiver: withdraw_receiver,
         }
