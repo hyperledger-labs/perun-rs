@@ -107,9 +107,9 @@ func (service *WatcherService) Watch(r WatchRequestMsg) error {
 		}, nil)
 
 		if err != nil {
-			return fmt.Errorf("Failed to withdraw: %w", err)
+			return fmt.Errorf("Failed to register final state: %w", err)
 		}
-		log.Warn("Successfully withdrawn!")
+		log.Warn("Successfully registered final state!")
 	}
 
 	return nil
