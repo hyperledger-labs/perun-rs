@@ -117,6 +117,7 @@ async fn alice(bus: Bus) {
         ),
         funding_agreement: init_balance,
         participant: addr,
+        peers: vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()],
     };
     // Propose new channel and wait for responses
     // withdraw_receiver is the on-chain Address that will receive funds

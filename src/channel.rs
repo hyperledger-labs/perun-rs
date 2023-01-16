@@ -34,3 +34,5 @@ pub struct Asset {
     pub chain_id: U256,
     pub holder: Address,
 }
+
+pub type Peers = Vec<Vec<u8>>;

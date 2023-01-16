@@ -14,6 +14,7 @@ use std::{
     fmt::Debug,
     io::{Read, Write},
     net::TcpStream,
+    vec,
 };
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
@@ -143,6 +144,7 @@ fn main() {
         ),
         funding_agreement: init_balance,
         participant: addr,
+        peers: vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()],
     };
     // Propose new channel and wait for responses
     let mut channel = client.propose_channel(prop, withdraw_receiver);

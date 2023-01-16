@@ -39,7 +39,7 @@ impl<B: MessageBus> PerunClient<B> {
         prop: LedgerChannelProposal,
         withdraw_receiver: Address,
     ) -> ProposedChannel<B> {
-        let c = ProposedChannel::new(self, 0, withdraw_receiver, prop);
+        let c = ProposedChannel::new(self, 0, withdraw_receiver, prop.clone());
         self.bus
             .send_to_participants(ParticipantMessage::ChannelProposal(prop));
         c
