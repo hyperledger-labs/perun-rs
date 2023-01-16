@@ -75,7 +75,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 		go func() {
 			switch msg := msg.GetMsg().(type) {
 			case *proto.Message_WatchRequest:
-				log.Warn("Server: Got watch request")
+				log.Warn("Server: Got watch request / update notification")
 				req, err := ParseWatchRequestMsg(msg.WatchRequest)
 				if err != nil {
 					log.Errorf("Invalid watch message: %v", err)
@@ -88,21 +88,6 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 					WatchResponse: &proto.WatchResponseMsg{
 						ChannelId: req.State.State.ID[:],
 						Version:   req.State.State.Version,
-						Success:   err == nil}}})
-			case *proto.Message_WatchUpdate:
-				log.Warn("Server: Got update notification")
-				req, err := ParseWatchUpdateMsg(msg.WatchUpdate)
-				if err != nil {
-					log.Errorf("Invalid update message: %v", err)
-					return
-				}
-				if err = s.watcher.Update(*req); err != nil {
-					log.Errorf("Invalid update received: %v", err)
-				}
-				sendMsg(&m, conn, &proto.Message{Msg: &proto.Message_WatchResponse{
-					WatchResponse: &proto.WatchResponseMsg{
-						ChannelId: req.InitialState.ID[:],
-						Version:   req.InitialState.Version,
 						Success:   err == nil}}})
 			case *proto.Message_ForceCloseRequest:
 				log.Warn("Server: Got dispute request")

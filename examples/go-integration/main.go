@@ -56,7 +56,6 @@ func main() {
 	adjudicator_account := w.GenerateNewAccount()
 	deployer_account := w.GenerateNewAccount()
 	funder_account := w.GenerateNewAccount()
-	funder_account_eth := phd.NewAccountFromEth(w, funder_account)
 
 	// Setup the simulated backend + wrappers around them
 	sb := backends.NewSimulatedBackend(
@@ -108,7 +107,7 @@ func main() {
 	adjudicator := ethchannel.NewAdjudicator(
 		cb,
 		adjAddr,
-		adjudicator_account.Address,
+		funder_account.Address,
 		adjudicator_account,
 	)
 	perunID := simple.NewAddress("Bob")
@@ -148,7 +147,7 @@ func main() {
 	go bus.Listen(listener)
 
 	server, err := remote.NewServer(
-		remote.NewWatcherService(watcher, adjudicator, funder_account_eth),
+		remote.NewWatcherService(watcher, adjudicator),
 		remote.NewFunderService(funder), 1338)
 	if err != nil {
 		panic(err)
