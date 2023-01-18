@@ -263,6 +263,8 @@ fn get_rng() -> impl Rng + CryptoRng {
 fn get_rng() -> impl Rng + CryptoRng {
     use rand::SeedableRng;
 
+    // Don't do that in production! For this example/demonstration this was the
+    // easiest way to get a working (though deterministic) Rng.
     rand::rngs::StdRng::seed_from_u64(0)
 }
 
