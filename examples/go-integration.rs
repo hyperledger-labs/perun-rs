@@ -2,6 +2,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(not(feature = "std"), feature(default_alloc_error_handler))]
 
+use core::cell::RefCell;
 use core::option::Option::{None, Some};
 use perun::{
     channel::{
@@ -13,6 +14,7 @@ use perun::{
     wire::{BytesBus, Identity, MessageBus, ProtoBufEncodingLayer},
     Address, PerunClient,
 };
+use prost::Message;
 use rand::{CryptoRng, Rng};
 
 #[cfg(not(any(feature = "std", feature = "nostd-example")))]
@@ -33,7 +35,7 @@ static HEAP: Heap = Heap::empty();
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
-use alloc::vec;
+use alloc::vec::Vec;
 
 // Dependencies for running in qemu
 #[cfg(not(feature = "std"))]
@@ -48,7 +50,7 @@ fn entry() -> ! {
     // Initialize the allocator BEFORE you use it
     {
         use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 1024;
+        const HEAP_SIZE: usize = 2048;
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
@@ -97,11 +99,9 @@ macro_rules! print_user_interaction {
     };
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", not(feature = "no-go-comm")))]
 mod net {
     use super::*;
-    use core::cell::RefCell;
-    use prost::Message;
     use std::{
         io::{Read, Write},
         net::TcpStream,
@@ -198,10 +198,20 @@ mod net {
     }
 }
 
-#[cfg(not(feature = "std"))]
+#[cfg(any(not(feature = "std"), feature = "no-go-comm"))]
 mod net {
+    use perun::{
+        abiencode::{self, types::Bytes32},
+        channel::fixed_size_payment::{Params, State},
+        messages::{LedgerChannelProposalAcc, LedgerChannelUpdate, LedgerChannelUpdateAccepted},
+        perunwire::{message, AuthResponseMsg, Envelope},
+        sig::k256::Signer,
+    };
+    use sha3::{Digest, Sha3_256};
+
     use super::*;
     use core::fmt::Debug;
+    use rand::{rngs::StdRng, SeedableRng};
 
     pub fn read_config() -> Config {
         print!("read_config\n");
@@ -209,36 +219,155 @@ mod net {
     }
 
     #[derive(Debug)]
+    struct InnerMutableData {
+        send_counter: usize,
+        rng: StdRng,
+        signer: Signer,
+        proposal: Option<LedgerChannelProposal>,
+        state: Option<State<1, 2>>,
+    }
+
+    #[derive(Debug)]
     pub struct Bus {
         participant: usize,
+        inner: RefCell<InnerMutableData>,
     }
 
     impl Bus {
         pub fn new() -> Self {
             print!("Bus::new\n");
-            Self { participant: 0 }
+
+            // Don't do that in production! For this example/demonstration this was the
+            // easiest way to get a working (though deterministic) Rng.
+            let mut rng = StdRng::seed_from_u64(666);
+            let signer = Signer::new(&mut rng);
+
+            let inner = InnerMutableData {
+                send_counter: 0,
+                rng,
+                signer,
+                proposal: None,
+                state: None,
+            };
+
+            Self {
+                participant: 0,
+                inner: RefCell::new(inner),
+            }
         }
 
         pub fn recv_envelope(&self) -> perunwire::Envelope {
-            print!("Bus::recv_envelope\n");
-            todo!()
+            print!("Bus::recv_envelope (replying with scripted value)\n");
+            let peers = get_peers();
+            let mut inner = self.inner.borrow_mut();
+
+            let wiremsg = match inner.send_counter {
+                0 => envelope::Msg::AuthResponseMsg(AuthResponseMsg {}),
+                1 => {
+                    let nonce_share: Bytes32 = inner.rng.gen();
+                    let proposal = inner
+                        .proposal
+                        .as_ref()
+                        .expect("Example should have proposed a channel by now.");
+                    let proposal_id = proposal.proposal_id;
+
+                    let mut hasher = Sha3_256::new();
+                    hasher.update(proposal.nonce_share.0);
+                    hasher.update(nonce_share.0);
+                    let nonce =
+                        abiencode::types::U256::from_big_endian(hasher.finalize().as_slice());
+
+                    let params = Params {
+                        challenge_duration: proposal.challenge_duration,
+                        nonce: nonce,
+                        participants: [proposal.participant, inner.signer.address()],
+                        app: Address::default(),
+                        ledger_channel: true,
+                        virtual_channel: false,
+                    };
+                    inner.state = Some(State::new(params, proposal.init_bals).unwrap());
+
+                    envelope::Msg::LedgerChannelProposalAccMsg(
+                        LedgerChannelProposalAcc {
+                            nonce_share,
+                            participant: inner.signer.address(),
+                            proposal_id,
+                        }
+                        .into(),
+                    )
+                }
+                2 => {
+                    let hash = abiencode::to_hash(&inner.state.unwrap()).unwrap();
+                    let sig = inner.signer.sign_eth(hash);
+                    envelope::Msg::ChannelUpdateAccMsg(
+                        LedgerChannelUpdateAccepted {
+                            channel: inner
+                                .state
+                                .expect("Example should have proposed a channel by now.")
+                                .channel_id(),
+                            version: 0,
+                            sig,
+                        }
+                        .into(),
+                    )
+                }
+                3 | 4 => panic!("Expected to send message message"),
+                5 => {
+                    let hash = abiencode::to_hash(&inner.state.unwrap()).unwrap();
+                    let sig = inner.signer.sign_eth(hash);
+                    envelope::Msg::ChannelUpdateAccMsg(
+                        LedgerChannelUpdateAccepted {
+                            channel: inner.state.unwrap().channel_id(),
+                            version: 1,
+                            sig,
+                        }
+                        .into(),
+                    )
+                }
+                x if x < 7 => panic!("Expected to send envelope message"),
+                _ => unimplemented!("End of scripted responses"),
+            };
+            let response = Envelope {
+                sender: peers[1].clone(),
+                recipient: peers[0].clone(),
+                msg: Some(wiremsg),
+            };
+            inner.send_counter += 1;
+            response
         }
 
         pub fn recv_message(&self) -> perunwire::Message {
             print!("Bus::recv_message\n");
-            todo!()
+            let mut inner = self.inner.borrow_mut();
+            let wiremsg = match inner.send_counter {
+                3 => message::Msg::WatchResponse(perunwire::WatchResponseMsg {
+                    channel_id: inner.state.unwrap().channel_id().0.to_vec(),
+                    version: 0,
+                    success: true,
+                }),
+                4 => message::Msg::FundingResponse(perunwire::FundingResponseMsg {
+                    channel_id: inner.state.unwrap().channel_id().0.to_vec(),
+                    success: true,
+                }),
+                6 => message::Msg::ForceCloseResponse(perunwire::ForceCloseResponseMsg {
+                    channel_id: inner.state.unwrap().channel_id().0.to_vec(),
+                    success: true,
+                }),
+                x if x < 7 => panic!("Expected to send envelope message"),
+                _ => unimplemented!("End of scripted responses"),
+            };
+            inner.send_counter += 1;
+            perunwire::Message { msg: Some(wiremsg) }
         }
     }
 
     impl BytesBus for &Bus {
         fn send_to_watcher(&self, msg: &[u8]) {
             print!("{}->Watcher: {:?}\n", PARTICIPANTS[self.participant], msg);
-            todo!()
         }
 
         fn send_to_funder(&self, msg: &[u8]) {
             print!("{}->Funder: {:?}\n", PARTICIPANTS[self.participant], msg);
-            todo!()
         }
 
         fn send_to_participant(&self, _: &Identity, _: &Identity, msg: &[u8]) {
@@ -248,7 +377,18 @@ mod net {
                 PARTICIPANTS[1 - self.participant],
                 msg,
             );
-            todo!()
+            let mut inner = self.inner.borrow_mut();
+            let envelope: perunwire::Envelope = perunwire::Envelope::decode(&msg[2..]).unwrap();
+            match envelope.msg.unwrap() {
+                perunwire::envelope::Msg::LedgerChannelProposalMsg(msg) => {
+                    inner.proposal = Some(msg.try_into().unwrap())
+                }
+                perunwire::envelope::Msg::ChannelUpdateMsg(msg) => {
+                    let update: LedgerChannelUpdate = msg.try_into().unwrap();
+                    inner.state = Some(update.state);
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -268,6 +408,10 @@ fn get_rng() -> impl Rng + CryptoRng {
     rand::rngs::StdRng::seed_from_u64(0)
 }
 
+fn get_peers() -> Vec<Vec<u8>> {
+    PARTICIPANTS.map(|p| p.as_bytes().to_vec()).into()
+}
+
 fn main() {
     let mut rng = get_rng();
 
@@ -277,8 +421,7 @@ fn main() {
 
     // Networking
     let bus = Bus::new();
-
-    let peers = vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()];
+    let peers = get_peers();
 
     // Signer, Addresses and Client
     let signer = Signer::new(&mut rng);
