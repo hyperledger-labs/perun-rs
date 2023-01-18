@@ -102,6 +102,10 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         nonce_share: NonceShare,
         address: Address,
     ) -> Result<(), AlreadyAcceptedError> {
+        // In go-perun this "can we sign it" is checked in `completeCPP` by
+        // trying to unlock the corresponding wallet.
+        assert_eq!(address, self.client.signer.address(), "We have to be able to sign things with this address and the current implementation is only able to have a single singer address. It is still part of the accept function signature because this will probably change in the future and this change would be backwards incompatible.");
+
         if self.part_id == 0 || self.responses[self.part_id - 1].is_some() {
             return Err(AlreadyAcceptedError);
         }
@@ -163,12 +167,21 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     }
 
     /// Progress to the next phase: Signing the initial state.
+    ///
+    /// This does **not** enforce channel_id uniqueness. Though exactly the same
+    /// channel_id is unlikely due to using different nonces. It is up to the
+    /// caller to handle this if he handles multiple channels and uses the
+    /// channel_id for forwarding messages to the correct channel (and having
+    /// multiple channels with the same channel_id will be problematic
+    /// on-chain). Checking this is not the task of this class, which is only
+    /// concerned about a single channel. Go-perun does this check in
+    /// `completeCPP`.
     pub fn build(self) -> Result<AgreedUponChannel<'a, B>, BuildError> {
         let mut participants = [Address::default(); PARTICIPANTS];
         participants[0] = self.proposal.participant;
 
         // Go-Perun does NOT use keccak256 here, probably to be less dependent
-        // on Ethereum. We do the same here.
+        // on Ethereum. We have to do the same here.
         let mut hasher = Sha3_256::new();
         hasher.update(self.proposal.nonce_share.0);
 

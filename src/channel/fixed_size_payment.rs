@@ -104,6 +104,18 @@ impl<const A: usize, const P: usize> State<A, P> {
 
 impl<const A: usize, const P: usize> State<A, P> {
     pub fn new(params: Params<P>, init_bals: Allocation<A, P>) -> Result<Self, abiencode::Error> {
+        init_bals.debug_assert_valid();
+        // Length equivalence to the other balances is checked in
+        // debug_assert_valid (and the following is also impossible to represent
+        // with the current types). I've just added this as a reminder for
+        // anyone implementing State based on this implementation in a way that
+        // doesn't enforce this at the type level.
+        debug_assert_eq!(
+            params.participants.len(),
+            init_bals.balances.0[0].0.len(),
+            "number of participants in parameters and initial balances don't match"
+        );
+
         Ok(State {
             id: params.channel_id()?,
             version: 0,
@@ -217,7 +229,66 @@ pub struct Allocation<const A: usize, const P: usize> {
     pub assets: [Asset; A],
     pub balances: Balances<A, P>,
     #[serde(with = "as_dyn_array")]
-    locked: [(); 0], // Only needed for encoding
+    pub(crate) locked: [(); 0], // Only needed for encoding
+}
+
+impl<const A: usize, const P: usize> Allocation<A, P> {
+    /// Returns the sum amount in this allocation for all assets.
+    pub fn total_assets(&self) -> [U256; A] {
+        let mut totals = [0.into(); A];
+        for (total, bals) in totals.iter_mut().zip(self.balances.0) {
+            for amt in bals.0 {
+                *total += amt;
+            }
+        }
+        totals
+    }
+
+    pub(crate) fn debug_assert_valid(&self) {
+        // Go-perun checks if the new state is valid (see `Allocation.Valid` in
+        // go-perun). This includes checking the asset slice lengths (which are
+        // impossible to represent using fixed-size arrays as done here). The
+        // following asserts should notify us in case we change the data
+        // structure and forget to add such checks here. They are based of the
+        // previously mentioned go-perun code. They primarily exist as a
+        // reminder.
+        const MAX_NUM_ASSETS: usize = 1024;
+        const MAX_NUM_PARTICIPANTS: usize = 1024;
+        debug_assert!(
+            !self.assets.is_empty(),
+            "assets must not be of length zero (>1 asset)"
+        );
+        debug_assert!(
+            !self.balances.0.is_empty(),
+            "participant balances must not be of length zero (>1 asset)"
+        );
+        debug_assert!(
+            self.assets.len() <= MAX_NUM_ASSETS,
+            "too many assets (go-perun has a hard-coded limit of 1024)"
+        );
+        debug_assert!(
+            self.locked.len() <= MAX_NUM_ASSETS,
+            "too many sub-allocations (go-perun has a hard-coded limit of 1024"
+        );
+        debug_assert_eq!(
+            self.assets.len(),
+            self.balances.0.len(),
+            "dimension missmatch"
+        );
+        let num_parts = self.balances.0[0].0.len();
+        debug_assert!(num_parts > 0, "number of participants is zero");
+        debug_assert!(
+            num_parts <= MAX_NUM_PARTICIPANTS,
+            "number of participants is too large (go-perun has a hard-coded limit of 1024)"
+        );
+        for b in self.balances.0 {
+            debug_assert_eq!(b.0.len(), num_parts);
+            // Go-perun additionally checks if it is < 0 for all amounts, which
+            // is unlikely to change here any time soon (we're using uint) and
+            // currently impossible to represent.
+        }
+        debug_assert!(self.locked.is_empty(), "Not a go-perun requirement, but the asserts above don't include anything about the content of locked, while go-perun does");
+    }
 }
 
 impl<const A: usize, const P: usize> TryFrom<perunwire::Allocation> for Allocation<A, P> {
