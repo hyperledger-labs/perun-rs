@@ -1,3 +1,4 @@
+use core::cell::RefCell;
 use perun::{
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
@@ -9,13 +10,15 @@ use perun::{
     Address, PerunClient,
 };
 use prost::Message;
+use rand::{CryptoRng, Rng};
 use std::{
-    cell::RefCell,
     fmt::Debug,
     io::{Read, Write},
     net::TcpStream,
-    vec,
 };
+
+#[cfg(not(any(feature = "std", feature = "nostd-example")))]
+compile_error!("When running this example in no_std add the feature flag 'nostd-example'");
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
 const NORMAL_CLOSE: bool = false;
@@ -103,7 +106,20 @@ macro_rules! print_user_interaction {
     };
 }
 
+#[cfg(feature = "std")]
+fn get_rng() -> impl Rng + CryptoRng {
+    rand::thread_rng()
+}
+#[cfg(not(feature = "std"))]
+fn get_rng() -> impl Rng + CryptoRng {
+    use rand::SeedableRng;
+
+    rand::rngs::StdRng::seed_from_u64(0)
+}
+
 fn main() {
+    let mut rng = get_rng();
+
     // Some information about the (temporary) blockchain we need, could be hard
     // coded into the application or received by some other means.
     let mut config_stream = TcpStream::connect("127.0.0.1:1339").unwrap();
@@ -124,7 +140,7 @@ fn main() {
     let peers = vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()];
 
     // Signer, Addresses and Client
-    let signer = Signer::new(&mut rand::thread_rng());
+    let signer = Signer::new(&mut rng);
     let addr = signer.address();
     let client = PerunClient::new(ProtoBufEncodingLayer { bus: &bus }, signer);
     client.send_handshake_msg(&peers[0], &peers[1]);
@@ -134,9 +150,9 @@ fn main() {
     print_user_interaction!("Proposing channel");
     let init_balance = Balances([ParticipantBalances([100.into(), 100.into()])]);
     let prop = LedgerChannelProposal {
-        proposal_id: rand::random(),
+        proposal_id: rng.gen(),
         challenge_duration: 25,
-        nonce_share: rand::random(),
+        nonce_share: rng.gen(),
         init_bals: Allocation::new(
             [Asset {
                 chain_id: 1337.into(), // Default chainID when using a SimulatedBackend from go-ethereum
