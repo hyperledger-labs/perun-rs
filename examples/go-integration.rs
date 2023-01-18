@@ -149,7 +149,7 @@ fn main() {
         peers,
     };
     // Propose new channel and wait for responses
-    let mut channel = client.propose_channel(prop, withdraw_receiver);
+    let mut channel = client.propose_channel(prop, withdraw_receiver).unwrap();
     match bus.recv_envelope().msg {
         Some(envelope::Msg::LedgerChannelProposalAccMsg(msg)) => channel
             .participant_accepted(1, msg.try_into().unwrap())
