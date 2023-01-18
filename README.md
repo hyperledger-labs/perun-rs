@@ -19,6 +19,12 @@ cargo run --example lowlevel_basic_channel
 
 # Compile without std (the example above requires std)
 cargo build --target thumbv7em-none-eabi --no-default-features -F k256
+
+# Compile example without std and run in qemu
+# - does not have communication with Go
+# - currently requires the nightly compiler (due to the chosen allocator)
+# - `--release` is needed to reduce the binary size so it fits into FLASH
+cargo +nightly run --example go-integration --target thumbv7m-none-eabi --no-default-features -F nostd-example --release
 ```
 
 ## Feature Flags

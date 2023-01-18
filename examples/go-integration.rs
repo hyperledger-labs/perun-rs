@@ -1,4 +1,8 @@
-use core::cell::RefCell;
+#![cfg_attr(not(feature = "std"), no_main)]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(feature = "std"), feature(default_alloc_error_handler))]
+
+use core::option::Option::{None, Some};
 use perun::{
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
@@ -9,83 +13,70 @@ use perun::{
     wire::{BytesBus, Identity, MessageBus, ProtoBufEncodingLayer},
     Address, PerunClient,
 };
-use prost::Message;
 use rand::{CryptoRng, Rng};
-use std::{
-    fmt::Debug,
-    io::{Read, Write},
-    net::TcpStream,
-};
 
 #[cfg(not(any(feature = "std", feature = "nostd-example")))]
 compile_error!("When running this example in no_std add the feature flag 'nostd-example'");
+
+// Panic handler
+#[cfg(not(feature = "std"))]
+use panic_semihosting as _;
+
+// Global allocator
+#[cfg(not(feature = "std"))]
+use embedded_alloc::Heap;
+#[cfg(not(feature = "std"))]
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+
+// Vectors (heap allocation)
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::vec;
+
+// Dependencies for running in qemu
+#[cfg(not(feature = "std"))]
+use cortex_m_rt::entry;
+#[cfg(not(feature = "std"))]
+use cortex_m_semihosting::{debug, hprint};
+
+// Make it runnable in qemu
+#[cfg(not(feature = "std"))]
+#[entry]
+fn entry() -> ! {
+    // Initialize the allocator BEFORE you use it
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+    }
+
+    main();
+
+    // exit QEMU
+    // NOTE do not run this on hardware; it can corrupt OpenOCD state
+    debug::exit(debug::EXIT_SUCCESS);
+
+    loop {}
+}
 
 const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
 const NORMAL_CLOSE: bool = false;
 const SEND_DISPUTE: bool = true;
 
-/// Message bus representing a tcp connection. For simplicity only using
-/// [std::sync::mpsc] and printing the data to stdout.
-#[derive(Debug)]
-struct Bus {
-    participant: usize,
-    stream: RefCell<TcpStream>,
-    remote_stream: RefCell<TcpStream>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Config {
+    pub eth_holder: Address,
+    pub withdraw_receiver: Address,
 }
 
-impl Bus {
-    fn recv_envelope(&self) -> perunwire::Envelope {
-        Self::recv_to(&self.stream)
-    }
-
-    fn recv_message(&self) -> perunwire::Message {
-        Self::recv_to(&self.remote_stream)
-    }
-
-    fn recv_to<T: Message + Default>(stream: &RefCell<TcpStream>) -> T {
-        let buf = Self::recv(stream);
-
-        // Decode data (the Encoding Layer currently does not decode, so to
-        // print stuff or call methods we have to do it at the moment).
-        let msg = T::decode(buf.as_slice()).unwrap();
-        println!("Received: {:#?}", msg);
-
-        msg
-    }
-
-    fn recv(stream: &RefCell<TcpStream>) -> Vec<u8> {
-        let mut stream = stream.borrow_mut();
-        // big endian u16 for length in bytes
-        let mut buf = [0u8; 2];
-        stream.read_exact(&mut buf).unwrap();
-        let len = u16::from_be_bytes(buf);
-        // Protobuf encoded data
-        let mut buf = vec![0u8; len as usize];
-        stream.read_exact(&mut buf).unwrap();
-        buf
-    }
-}
-
-impl BytesBus for &Bus {
-    fn send_to_watcher(&self, msg: &[u8]) {
-        println!("{}->Watcher: {:?}", PARTICIPANTS[self.participant], msg);
-        self.remote_stream.borrow_mut().write(msg).unwrap();
-    }
-
-    fn send_to_funder(&self, msg: &[u8]) {
-        println!("{}->Funder: {:?}", PARTICIPANTS[self.participant], msg);
-        self.remote_stream.borrow_mut().write(msg).unwrap();
-    }
-
-    fn send_to_participant(&self, _: &Identity, _: &Identity, msg: &[u8]) {
-        println!(
-            "{}->{}: {:?}",
-            PARTICIPANTS[self.participant],
-            PARTICIPANTS[1 - self.participant],
-            msg,
-        );
-        self.stream.borrow_mut().write(msg).unwrap();
-    }
+#[cfg(not(feature = "std"))]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        hprint!($($arg)*);
+    };
 }
 
 /// Helper macro to print significant places in the protocol.
@@ -93,7 +84,7 @@ macro_rules! print_bold {
     ($($arg:tt)*) => {
         print!("\x1b[1m");
         print!($($arg)*);
-        println!("\x1b[0m");
+        print!("\x1b[0m\n");
     };
 }
 
@@ -102,9 +93,167 @@ macro_rules! print_user_interaction {
     ($($arg:tt)*) => {
         print!("\x1b[1;34m");
         print!($($arg)*);
-        println!("\x1b[0m");
+        print!("\x1b[0m\n");
     };
 }
+
+#[cfg(feature = "std")]
+mod net {
+    use super::*;
+    use core::cell::RefCell;
+    use prost::Message;
+    use std::{
+        io::{Read, Write},
+        net::TcpStream,
+    };
+
+    pub fn read_config() -> Config {
+        // Some information about the (temporary) blockchain we need, could be hard
+        // coded into the application or received by some other means.
+        let mut config_stream = TcpStream::connect("127.0.0.1:1339").unwrap();
+        let mut buf = [0u8; 20];
+
+        config_stream.read_exact(&mut buf).unwrap();
+        let eth_holder = Address(buf);
+
+        config_stream.read_exact(&mut buf).unwrap();
+        let withdraw_receiver = Address(buf);
+
+        Config {
+            eth_holder,
+            withdraw_receiver,
+        }
+    }
+
+    /// Message bus representing a tcp connection. For simplicity only using
+    /// [std::sync::mpsc] and printing the data to stdout.
+    #[derive(Debug)]
+    pub struct Bus {
+        participant: usize,
+        stream: RefCell<TcpStream>,
+        remote_stream: RefCell<TcpStream>,
+    }
+
+    impl Bus {
+        pub fn new() -> Self {
+            Self {
+                participant: 0,
+                stream: RefCell::new(TcpStream::connect("127.0.0.1:1337").unwrap()),
+                remote_stream: RefCell::new(TcpStream::connect("127.0.0.1:1338").unwrap()),
+            }
+        }
+
+        pub fn recv_envelope(&self) -> perunwire::Envelope {
+            Self::recv_to(&self.stream)
+        }
+
+        pub fn recv_message(&self) -> perunwire::Message {
+            Self::recv_to(&self.remote_stream)
+        }
+
+        fn recv_to<T: Message + Default>(stream: &RefCell<TcpStream>) -> T {
+            let buf = Self::recv(stream);
+
+            // Decode data (the Encoding Layer currently does not decode, so to
+            // print stuff or call methods we have to do it at the moment).
+            let msg = T::decode(buf.as_slice()).unwrap();
+            println!("Received: {:#?}", msg);
+
+            msg
+        }
+
+        fn recv(stream: &RefCell<TcpStream>) -> Vec<u8> {
+            let mut stream = stream.borrow_mut();
+            // big endian u16 for length in bytes
+            let mut buf = [0u8; 2];
+            stream.read_exact(&mut buf).unwrap();
+            let len = u16::from_be_bytes(buf);
+            // Protobuf encoded data
+            let mut buf = vec![0u8; len as usize];
+            stream.read_exact(&mut buf).unwrap();
+            buf
+        }
+    }
+
+    impl BytesBus for &Bus {
+        fn send_to_watcher(&self, msg: &[u8]) {
+            print!("{}->Watcher: {:?}\n", PARTICIPANTS[self.participant], msg);
+            self.remote_stream.borrow_mut().write(msg).unwrap();
+        }
+
+        fn send_to_funder(&self, msg: &[u8]) {
+            print!("{}->Funder: {:?}\n", PARTICIPANTS[self.participant], msg);
+            self.remote_stream.borrow_mut().write(msg).unwrap();
+        }
+
+        fn send_to_participant(&self, _: &Identity, _: &Identity, msg: &[u8]) {
+            print!(
+                "{}->{}: {:?}\n",
+                PARTICIPANTS[self.participant],
+                PARTICIPANTS[1 - self.participant],
+                msg,
+            );
+            self.stream.borrow_mut().write(msg).unwrap();
+        }
+    }
+}
+
+#[cfg(not(feature = "std"))]
+mod net {
+    use super::*;
+    use core::fmt::Debug;
+
+    pub fn read_config() -> Config {
+        print!("read_config\n");
+        Config::default()
+    }
+
+    #[derive(Debug)]
+    pub struct Bus {
+        participant: usize,
+    }
+
+    impl Bus {
+        pub fn new() -> Self {
+            print!("Bus::new\n");
+            Self { participant: 0 }
+        }
+
+        pub fn recv_envelope(&self) -> perunwire::Envelope {
+            print!("Bus::recv_envelope\n");
+            todo!()
+        }
+
+        pub fn recv_message(&self) -> perunwire::Message {
+            print!("Bus::recv_message\n");
+            todo!()
+        }
+    }
+
+    impl BytesBus for &Bus {
+        fn send_to_watcher(&self, msg: &[u8]) {
+            print!("{}->Watcher: {:?}\n", PARTICIPANTS[self.participant], msg);
+            todo!()
+        }
+
+        fn send_to_funder(&self, msg: &[u8]) {
+            print!("{}->Funder: {:?}\n", PARTICIPANTS[self.participant], msg);
+            todo!()
+        }
+
+        fn send_to_participant(&self, _: &Identity, _: &Identity, msg: &[u8]) {
+            print!(
+                "{}->{}: {:?}\n",
+                PARTICIPANTS[self.participant],
+                PARTICIPANTS[1 - self.participant],
+                msg,
+            );
+            todo!()
+        }
+    }
+}
+
+use net::Bus;
 
 #[cfg(feature = "std")]
 fn get_rng() -> impl Rng + CryptoRng {
@@ -122,20 +271,10 @@ fn main() {
 
     // Some information about the (temporary) blockchain we need, could be hard
     // coded into the application or received by some other means.
-    let mut config_stream = TcpStream::connect("127.0.0.1:1339").unwrap();
-    let mut buf = [0u8; 20];
-    config_stream.read_exact(&mut buf).unwrap();
-    let eth_holder = Address(buf);
-    config_stream.read_exact(&mut buf).unwrap();
-    let withdraw_receiver = Address(buf);
-    drop(config_stream);
+    let config = net::read_config();
 
     // Networking
-    let bus = Bus {
-        participant: 0,
-        stream: RefCell::new(TcpStream::connect("127.0.0.1:1337").unwrap()),
-        remote_stream: RefCell::new(TcpStream::connect("127.0.0.1:1338").unwrap()),
-    };
+    let bus = Bus::new();
 
     let peers = vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()];
 
@@ -156,7 +295,7 @@ fn main() {
         init_bals: Allocation::new(
             [Asset {
                 chain_id: 1337.into(), // Default chainID when using a SimulatedBackend from go-ethereum
-                holder: eth_holder,
+                holder: config.eth_holder,
             }],
             init_balance,
         ),
@@ -165,7 +304,9 @@ fn main() {
         peers,
     };
     // Propose new channel and wait for responses
-    let mut channel = client.propose_channel(prop, withdraw_receiver).unwrap();
+    let mut channel = client
+        .propose_channel(prop, config.withdraw_receiver)
+        .unwrap();
     match bus.recv_envelope().msg {
         Some(envelope::Msg::LedgerChannelProposalAccMsg(msg)) => channel
             .participant_accepted(1, msg.try_into().unwrap())
