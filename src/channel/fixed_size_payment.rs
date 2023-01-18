@@ -297,23 +297,15 @@ impl<const A: usize, const P: usize> TryFrom<perunwire::Allocation> for Allocati
     fn try_from(value: perunwire::Allocation) -> Result<Self, Self::Error> {
         let mut assets = [Asset::default(); A];
         for (a, b) in assets.iter_mut().zip(value.assets) {
-            if b.len() < 2 + 20 + 2 {
+            if b.len() < 2 + 32 + 2 {
                 // We have to at least store two lengths (2 bytes each), the first of which has
-                // to be 20 bytes.
+                // to be 32 bytes.
                 return Err(ConversionError::ByteLengthMissmatch);
             }
-            // holder
-            let holder_length = u16::from_le_bytes(b[..2].try_into().unwrap());
-            if holder_length != 20u16 {
-                return Err(ConversionError::ByteLengthMissmatch);
-            }
-            let b: &[u8] = &b[2..];
-            let mut holder = Address::default();
-            holder.0.copy_from_slice(&b[..20]);
-            let b = &b[20..];
             // chainid
             let chain_id_length = u16::from_le_bytes(b[..2].try_into().unwrap());
-            if chain_id_length > 32u16 || b.len() != chain_id_length as usize {
+            let b: &[u8] = &b[2..];
+            if chain_id_length != 32u16 {
                 // if it is larger than 32 bytes we cannot represent it in this
                 // type, and a larger value (while representable in Go) doesn't
                 // make sense in this context. Additionally, the buffer b has to
@@ -321,10 +313,18 @@ impl<const A: usize, const P: usize> TryFrom<perunwire::Allocation> for Allocati
                 // the first condition.
                 return Err(ConversionError::ByteLengthMissmatch);
             }
-            // We can only use from_big_endian if we have 32 bytes
             let mut buffer = [0u8; 32];
-            buffer[(32 - chain_id_length as usize)..].copy_from_slice(b);
+            buffer[(32 - chain_id_length as usize)..].copy_from_slice(&b[..32]);
+            let b = &b[32..];
             let chain_id = U256::from_big_endian(&buffer);
+            // holder
+            let holder_length = u16::from_le_bytes(b[..2].try_into().unwrap());
+            let b: &[u8] = &b[2..];
+            if holder_length != 20u16 || b.len() != holder_length as usize {
+                return Err(ConversionError::ByteLengthMissmatch);
+            }
+            let mut holder = Address::default();
+            holder.0.copy_from_slice(&b[..20]);
 
             *a = Asset { chain_id, holder }
         }
