@@ -82,13 +82,13 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         client: &'a PerunClient<B>,
         part_id: PartID,
         withdraw_receiver: Address,
-        prop: LedgerChannelProposal,
+        proposal: LedgerChannelProposal,
     ) -> Self {
         ProposedChannel {
-            part_id: part_id,
+            part_id,
             withdraw_receiver,
-            client: client,
-            proposal: prop,
+            client,
+            proposal,
             responses: [None],
         }
     }
@@ -200,7 +200,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         // Create the initial state
         let params: Params = Params {
             challenge_duration: self.proposal.challenge_duration,
-            nonce: nonce,
+            nonce,
             participants,
             app: Address([0u8; 20]),
             ledger_channel: true,

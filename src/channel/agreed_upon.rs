@@ -116,7 +116,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                     ParticipantMessage::ChannelUpdateAccepted(LedgerChannelUpdateAccepted {
                         channel: self.init_state.channel_id(),
                         version: self.init_state.version(),
-                        sig: sig,
+                        sig,
                     }),
                 );
                 Ok(())
@@ -152,17 +152,13 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         // to do that). On the other side, Rust would allow multiple
         // participants with the same wire identity (which doesn't really make
         // sense either).
-        let part_id: PartID = match self
+        let (part_id, _) = self
             .params
             .participants
             .iter()
             .enumerate()
-            .filter(|(_, &addr)| addr == signer)
-            .next()
-        {
-            Some((part_id, _)) => part_id,
-            None => return Err(AddSignatureError::InvalidSignature(signer)),
-        };
+            .find(|(_, &addr)| addr == signer)
+            .ok_or(AddSignatureError::InvalidSignature(signer))?;
 
         match self.signatures[part_id] {
             Some(_) => Err(AddSignatureError::AlreadySigned),
@@ -189,7 +185,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                 part_id: self.part_id,
                 params: self.params,
                 state: self.init_state,
-                signatures: signatures,
+                signatures,
                 withdrawal_auths: make_signed_withdrawal_auths(
                     &self.client.signer,
                     self.init_state.channel_id(),

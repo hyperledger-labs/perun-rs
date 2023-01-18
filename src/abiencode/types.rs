@@ -25,7 +25,7 @@ macro_rules! impl_hex_debug {
 
 macro_rules! bytesN {
     ( $T:ident, $N:literal ) => {
-        #[derive(PartialEq, Copy, Clone)]
+        #[derive(PartialEq, Eq, Copy, Clone)]
         pub struct $T(pub [u8; $N]);
 
         impl Serialize for $T {

@@ -492,7 +492,7 @@ where
     type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<()> {
-        self.serialize_u8(if v { 1 } else { 0 })
+        self.serialize_u8(v as u8)
     }
 
     fn serialize_i8(self, v: i8) -> Result<()> {
@@ -650,7 +650,7 @@ where
                 for chunk in iter {
                     self.writer.write(chunk);
                 }
-                if rem.len() > 0 {
+                if !rem.is_empty() {
                     self.write_left_aligned_slice(rem);
                 }
             }
@@ -672,7 +672,7 @@ where
                 for chunk in iter {
                     self.writer.write(chunk);
                 }
-                if rem.len() > 0 {
+                if !rem.is_empty() {
                     self.write_left_aligned_slice(rem);
                 }
             }
