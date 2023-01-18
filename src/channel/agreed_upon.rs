@@ -2,7 +2,7 @@ use super::{
     fixed_size_payment::{self},
     signed::SignedChannel,
     withdrawal_auth::make_signed_withdrawal_auths,
-    PartID,
+    PartID, Peers,
 };
 use crate::{
     abiencode::{
@@ -14,7 +14,7 @@ use crate::{
         ParticipantMessage, WatchInfo, WatcherRequestMessage,
     },
     sig,
-    wire::MessageBus,
+    wire::{BroadcastMessageBus, MessageBus},
     PerunClient,
 };
 
@@ -75,6 +75,7 @@ pub struct AgreedUponChannel<'a, B: MessageBus> {
     init_state: State,
     params: Params,
     signatures: [Option<Signature>; 2],
+    peers: Peers,
 }
 
 impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
@@ -85,6 +86,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         withdraw_receiver: Address,
         init_state: State,
         params: Params,
+        peers: Peers,
     ) -> Self {
         AgreedUponChannel {
             part_id,
@@ -94,6 +96,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             init_state,
             params,
             signatures: [None; PARTICIPANTS],
+            peers,
         }
     }
 
@@ -107,15 +110,15 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                 // Add signature to the proposed channel
                 self.signatures[self.part_id] = Some(sig);
                 // Send to other participants
-                self.client
-                    .bus
-                    .send_to_participants(ParticipantMessage::ChannelUpdateAccepted(
-                        LedgerChannelUpdateAccepted {
-                            channel: self.init_state.channel_id(),
-                            version: self.init_state.version(),
-                            sig: sig,
-                        },
-                    ));
+                self.client.bus.broadcast_to_participants(
+                    self.part_id,
+                    &self.peers,
+                    ParticipantMessage::ChannelUpdateAccepted(LedgerChannelUpdateAccepted {
+                        channel: self.init_state.channel_id(),
+                        version: self.init_state.version(),
+                        sig: sig,
+                    }),
+                );
                 Ok(())
             }
         }
@@ -139,11 +142,16 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
 
         // Verify signature is comming from a valid participant.
         //
-        // TODO: There is currently a difference to go-perun, which gets the
+        // There is currently a difference to go-perun, which gets the
         // participant index by comparing `wire.Address`-es instead of ephemeral
         // `wallet.Address`-es, then compares only against one `wallet.Address`.
         // As long as both are unique this doesn't make a difference (not even
-        // in performance).
+        // in performance). This means that channels where multiple participants
+        // have the same channel key would be problematic in Rust, while it
+        // would be perfectly fine in Go (except that it wouldn't be a good idea
+        // to do that). On the other side, Rust would allow multiple
+        // participants with the same wire identity (which doesn't really make
+        // sense either).
         let part_id: PartID = match self
             .params
             .participants
@@ -178,6 +186,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         self.client
             .bus
             .send_to_watcher(WatcherRequestMessage::WatchRequest(WatchInfo {
+                part_id: self.part_id,
                 params: self.params,
                 state: self.init_state,
                 signatures: signatures,
@@ -195,6 +204,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             .bus
             .send_to_funder(FunderRequestMessage::FundingRequest(
                 LedgerChannelFundingRequest {
+                    part_id: self.part_id,
                     funding_agreement: self.funding_agreement,
                     params: self.params,
                     state: self.init_state,
@@ -208,6 +218,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             self.init_state,
             self.params,
             signatures,
+            self.peers,
         ))
     }
 }

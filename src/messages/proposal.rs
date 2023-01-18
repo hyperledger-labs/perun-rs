@@ -1,6 +1,6 @@
 use crate::{
     abiencode::types::{Address, Bytes32, Hash},
-    channel::{fixed_size_payment, NonceShare},
+    channel::{fixed_size_payment, NonceShare, Peers},
     messages::ConversionError,
     perunwire,
 };
@@ -12,7 +12,7 @@ type Allocation = fixed_size_payment::Allocation<ASSETS, PARTICIPANTS>;
 type Balances = fixed_size_payment::Balances<ASSETS, PARTICIPANTS>;
 
 /// Channel configuration (also exchanged over the network)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct LedgerChannelProposal {
     pub proposal_id: Hash,
     pub challenge_duration: u64,
@@ -20,6 +20,7 @@ pub struct LedgerChannelProposal {
     pub init_bals: Allocation,
     pub funding_agreement: Balances,
     pub participant: Address,
+    pub peers: Peers,
 }
 
 impl TryFrom<perunwire::LedgerChannelProposalMsg> for LedgerChannelProposal {
@@ -59,6 +60,7 @@ impl TryFrom<perunwire::LedgerChannelProposalMsg> for LedgerChannelProposal {
                     .try_into()
                     .or(Err(ConversionError::ByteLengthMissmatch))?,
             ),
+            peers: value.peers,
         })
     }
 }
@@ -76,7 +78,7 @@ impl From<LedgerChannelProposal> for perunwire::LedgerChannelProposalMsg {
                 funding_agreement: Some(value.funding_agreement.into()),
             }),
             participant: value.participant.0.to_vec(),
-            peers: vec!["Alice".as_bytes().to_vec(), "Bob".as_bytes().to_vec()], // TODO: Use real data
+            peers: value.peers,
         }
     }
 }

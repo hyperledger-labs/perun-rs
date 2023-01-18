@@ -1,7 +1,7 @@
 use crate::channel::ProposedChannel;
 use crate::messages::{LedgerChannelProposal, ParticipantMessage};
 use crate::sig::Signer;
-use crate::wire::MessageBus;
+use crate::wire::{BroadcastMessageBus, Identity, MessageBus};
 use crate::Address;
 use core::fmt::Debug;
 
@@ -28,8 +28,9 @@ impl<B: MessageBus> PerunClient<B> {
         PerunClient { bus, signer }
     }
 
-    pub fn send_handshake_msg(&self) {
-        self.bus.send_to_participants(ParticipantMessage::Auth);
+    pub fn send_handshake_msg(&self, sender: &Identity, recipient: &Identity) {
+        self.bus
+            .send_to_participant(sender, recipient, ParticipantMessage::Auth);
     }
 
     /// Propose a new channel with the given parameters/proposal and send a
@@ -39,10 +40,22 @@ impl<B: MessageBus> PerunClient<B> {
         prop: LedgerChannelProposal,
         withdraw_receiver: Address,
     ) -> ProposedChannel<B> {
-        let c = ProposedChannel::new(self, 0, withdraw_receiver, prop);
-        self.bus
-            .send_to_participants(ParticipantMessage::ChannelProposal(prop));
-        c
+        // ProposedChannel::new cannot fail (panic or return an Error).
+        // Therefore it does not make a difference weather we first create the
+        // return object or first send out the messages (which currently use a
+        // reference to avoid copying the Identifier too often, though that may
+        // change in the future). This means we can save on a call to
+        // prop.clone() by using the proposal for the return value as reference
+        // for the peers needed to broadcast, which we would have had to clone
+        // if we couldn't change the order of the lines below.
+        //
+        // Alternatively we could have added a second clone, add a livetime to
+        // ParticipantMessage, change broadcast_to_participants to not use a
+        // reference (which also requires a second clone), or read the proposal
+        // back from the ProposedChannel.
+        let msg = ParticipantMessage::ChannelProposal(prop.clone());
+        self.bus.broadcast_to_participants(0, &prop.peers, msg);
+        ProposedChannel::new(self, 0, withdraw_receiver, prop)
     }
 
     /// Call this when receiving a proposal message, then call `accept()` or

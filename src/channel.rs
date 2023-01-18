@@ -7,6 +7,7 @@ mod signed;
 mod withdrawal_auth;
 
 use crate::abiencode::types::{Address, Bytes32, U256};
+use alloc::vec::Vec;
 use serde::Serialize;
 
 pub use agreed_upon::*;
@@ -34,3 +35,5 @@ pub struct Asset {
     pub chain_id: U256,
     pub holder: Address,
 }
+
+pub type Peers = Vec<Vec<u8>>;

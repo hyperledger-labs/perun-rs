@@ -160,11 +160,12 @@ macro_rules! explain {
 /// Helper function to print called methods on the [Serializer].
 ///
 /// Does nothing in a no_std environment or when [DO_TRACE] is `false`.
+#[inline]
 fn trace(_method: &str, _pass: &Pass) {
     #[cfg(feature = "std")]
     if DO_TRACE {
         match _pass {
-            Pass::HeadSize(_) => {}
+            Pass::HeadSize { .. } => {}
             // Pass::TailSize(_) => {}
             _ => {
                 println!("TRACE: {}({:?})", _method, _pass);
@@ -207,8 +208,14 @@ enum Pass {
     // we need to know if the type is dynamic to beginn with Pass::Head. Both
     // could be computed at compile time. is_dynamic is stored outside of Pass
     // because it is needed by all Passes.
-    HeadSize(usize),
-    Head { offset: usize }, // First pass: Write the static part (stores the offset for the next dynamic value)
+    HeadSize {
+        size: usize,
+        is_dynamic: bool,
+        is_fake_dynamic: bool,
+    },
+    Head {
+        offset: usize,
+    }, // First pass: Write the static part (stores the offset for the next dynamic value)
     TailSize(usize),
     Tail, // Second pass: Write the dynamic part
 }
@@ -219,8 +226,6 @@ where
 {
     writer: &'a mut W,
     pass: Pass,
-    is_dynamic: bool,
-    is_fake_dynamic: bool,
 }
 
 pub fn to_writer<T, W>(value: &T, writer: &mut W) -> Result<()>
@@ -245,13 +250,11 @@ where
     T: Serialize,
     W: Writer,
 {
-    let (head_size, is_dynamic, is_fake_dynamic) = compute_size(&value)?;
+    let (head_size, is_dynamic, _) = compute_size(&value)?;
 
     let mut serializer = Serializer {
         writer,
         pass: Pass::Head { offset: head_size },
-        is_dynamic,
-        is_fake_dynamic,
     };
 
     if is_dynamic && include_outer_struct {
@@ -272,16 +275,21 @@ where
 {
     let mut serializer = Serializer {
         writer: &mut NoWriter,
-        pass: Pass::HeadSize(0),
-        is_dynamic: false,
-        is_fake_dynamic: false,
+        pass: Pass::HeadSize {
+            size: 0,
+            is_dynamic: false,
+            is_fake_dynamic: false,
+        },
     };
     value.serialize(&mut serializer)?;
 
-    // This can only panic if the serializer changes the pass variable.
-    // TODO: Make sure that this panic cannot happen at compile time.
-    if let Pass::HeadSize(head_size) = serializer.pass {
-        Ok((head_size, serializer.is_dynamic, serializer.is_fake_dynamic))
+    if let Pass::HeadSize {
+        size,
+        is_dynamic,
+        is_fake_dynamic,
+    } = serializer.pass
+    {
+        Ok((size, is_dynamic, is_fake_dynamic))
     } else {
         unreachable!(
             "This should never happen if the serializer does not modify its own pass variable!"
@@ -321,36 +329,29 @@ where
     where
         T: Serialize,
     {
-        let (_, is_dynamic, is_fake_dynamic) = compute_size(&value)?;
         let mut serializer = Serializer {
             writer: self.writer,
             pass,
-            is_dynamic: is_dynamic,
-            is_fake_dynamic,
         };
         value.serialize(&mut serializer)?;
         Ok(())
     }
 
-    // TODO: Make this independent of self?
-    fn get_tail_size<T>(&self, value: &T) -> Result<usize>
+    fn get_tail_size<T>(value: &T) -> Result<usize>
     where
         T: Serialize,
     {
         let mut serializer = Serializer {
             writer: &mut NoWriter,
             pass: Pass::TailSize(0),
-            is_dynamic: false,      // TODO: Make sure this is correct
-            is_fake_dynamic: false, // TODO: Make sure this really doesn't matter
         };
         value.serialize(&mut serializer)?;
         // This can only panic if the serializer changes the pass variable.
-        // TODO: Make sure that this panic cannot happen at compile time.
         if let Pass::TailSize(tail_size) = serializer.pass {
             Ok(tail_size)
         } else {
             unreachable!(
-                "This should never happen if the serializer does not modify its own pass variable!"
+                "This should never happen because the serializer does not modify its own pass variable variant"
             )
         }
     }
@@ -360,58 +361,86 @@ where
     // isn't.
     //
     // This helper function does exactly that to avoid code duplication by
-    // making it easier to execute this behavior.
+    // making it easier to execute this behavior. The "tuple" here refers to
+    // tuples in the abi specs, which are basically structs in Rust. It is also
+    // used in Sequences (Lists).
+    //
+    // Set offset_reduction=0 unless there is something (like the length in
+    // sequences) that has to be written in Pass::Head (and thus has an effect
+    // on the total size of the encoded value), but does not count towards the
+    // offset.
     fn serialize_tuple_element<T: ?Sized>(
         &mut self,
         name: Option<&'static str>,
         value: &T,
+        offset_reduction: usize,
     ) -> Result<()>
     where
         T: Serialize,
     {
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => {
-                let (size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
+            Pass::HeadSize {
+                ref mut size,
+                ref mut is_dynamic,
+                ..
+            } => {
+                let (element_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
                 // Unfortunately we can't use mutable references in the match
                 // statement because compute_size requires a reference, too.
-                // TODO: Make compute_size not use self or value and ideally
-                // compute it at compile time.
 
-                *head_size += if is_dyn && !is_fake_dynamic {
+                *size += if is_dyn && !is_fake_dynamic {
                     SLOT_SIZE
                 } else {
-                    size
+                    element_size
                 };
 
-                self.is_dynamic |= is_dyn || is_fake_dynamic;
+                *is_dynamic |= is_dyn || is_fake_dynamic;
                 Ok(())
             }
             Pass::Head { offset } => {
                 let (field_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
                 if is_dyn && !is_fake_dynamic {
-                    self.write_right_aligned(offset.to_be_bytes());
+                    // The length (only used in Serde Sequences = Solidity dynamic
+                    // length arrays) is part of the Head pass (as it is written
+                    // there), but according to the specs and testing in Solidity it
+                    // is not included when calculating the offset for any dynamic
+                    // fields/elements. Because this is the only difference between
+                    // sequence elements and struct fields the offset_reduction
+                    // param allows using this function for both.
+                    self.write_right_aligned((offset - offset_reduction).to_be_bytes());
                     match name {
                         Some(_name) => {
                             explain!("{} offset (HEAD)", _name);
                         }
                         None => {
-                            explain!("offset (HEAD)");
+                            explain!("element/field offset (HEAD)");
                         }
                     };
 
                     self.pass = Pass::Head {
-                        offset: offset + field_head_size + self.get_tail_size(&value)?,
+                        offset: offset + field_head_size + Self::get_tail_size(&value)?,
                     };
                     Ok(())
                 } else {
-                    // TODO: This offset might be wrong, at the moment changing
-                    // it does not cause a test to fail.
-                    self.serialize(&value, Pass::Head { offset: offset })
+                    // The element is not dynamic (nor faked-dynamic) => it does
+                    // not have a tail => It never writes offsets => The value
+                    // for offsets doesn't matter. => We can't test if this is
+                    // correct.
+                    //
+                    // There isn't a good way to detect when it is read either,
+                    // so we just fail as loudly as we can: In debug builds we
+                    // panic due to an integer overflow whenever offset is
+                    // changed and when it is read it will be immediately
+                    // noticable from the output (when printed/examined). In
+                    // release builds this will write hex 0xFFFFFFFFFFFFFFFF as
+                    // the offset, which is unlikely to occur normally (still
+                    // possible as a U256 of course).
+                    self.serialize(&value, Pass::Head { offset: usize::MAX })
                 }
             }
             Pass::TailSize(size) => {
                 let (field_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                let field_tail_size = self.get_tail_size(&value)?;
+                let field_tail_size = Self::get_tail_size(&value)?;
                 self.pass = Pass::TailSize(
                     size + if is_dyn && !is_fake_dynamic {
                         field_head_size
@@ -469,7 +498,7 @@ where
     fn serialize_i8(self, v: i8) -> Result<()> {
         trace("serialize_i8", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_signed(v < 0, v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -480,7 +509,7 @@ where
     fn serialize_i16(self, v: i16) -> Result<()> {
         trace("serialize_i16", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_signed(v < 0, v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -491,7 +520,7 @@ where
     fn serialize_i32(self, v: i32) -> Result<()> {
         trace("serialize_i32", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_signed(v < 0, v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -502,7 +531,7 @@ where
     fn serialize_i64(self, v: i64) -> Result<()> {
         trace("serialize_i64", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_signed(v < 0, v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -513,7 +542,7 @@ where
     fn serialize_i128(self, v: i128) -> Result<()> {
         trace("serialize_i128", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_right_aligned(v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -524,7 +553,7 @@ where
     fn serialize_u8(self, v: u8) -> Result<()> {
         trace("serialize_u8", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_right_aligned(v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -535,7 +564,7 @@ where
     fn serialize_u16(self, v: u16) -> Result<()> {
         trace("serialize_u16", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_right_aligned(v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -546,7 +575,7 @@ where
     fn serialize_u32(self, v: u32) -> Result<()> {
         trace("serialize_u32", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_right_aligned(v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -557,7 +586,7 @@ where
     fn serialize_u64(self, v: u64) -> Result<()> {
         trace("serialize_u64", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_right_aligned(v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -568,7 +597,7 @@ where
     fn serialize_u128(self, v: u128) -> Result<()> {
         trace("serialize_u128", &self.pass);
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => *head_size += SLOT_SIZE,
+            Pass::HeadSize { ref mut size, .. } => *size += SLOT_SIZE,
             Pass::Head { .. } => self.write_right_aligned(v.to_be_bytes()),
             Pass::TailSize(_) => {}
             Pass::Tail => {}
@@ -597,18 +626,16 @@ where
         // we don't need serialize_str for anything else and thus do not have to
         // rely on DynamicMarker and an additional tuple.
         match self.pass {
-            Pass::HeadSize(_) => {
-                self.is_dynamic = true;
+            Pass::HeadSize {
+                ref mut is_dynamic, ..
+            } => {
+                *is_dynamic = true;
             }
             Pass::Head { .. } => {}
             Pass::TailSize(ref mut size) => {
                 // Calculate the amount of slots the dynamic part needs to
                 // forward the offset. The length is in bytes.
                 let r = v.len() % SLOT_SIZE;
-                // TODO: Make sure we have a test checking if we set the length
-                // correctly if r == 0 (string length 32 and 64), which also
-                // tests if writing the remainder works correctly.
-                //
                 //                        length + chunks        + rem
                 let tail_size = SLOT_SIZE + (v.len() - r) + (if r == 0 { 0 } else { SLOT_SIZE });
 
@@ -623,7 +650,9 @@ where
                 for chunk in iter {
                     self.writer.write(chunk);
                 }
-                self.write_left_aligned_slice(rem);
+                if rem.len() > 0 {
+                    self.write_left_aligned_slice(rem);
+                }
             }
         };
         Ok(())
@@ -632,13 +661,10 @@ where
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
         trace("serialize_bytes", &self.pass);
         match self.pass {
-            // TODO: Make sure we have a test checking if we set the length
-            // correctly if r == 0 (bytes length 32 and 64), which also
-            // tests if writing the remainder works correctly.
-            Pass::HeadSize(ref mut head_size) => {
+            Pass::HeadSize { ref mut size, .. } => {
                 let r = v.len() % SLOT_SIZE;
                 //                   size + chunks        + rem
-                *head_size += (v.len() - r) + (if r == 0 { 0 } else { SLOT_SIZE });
+                *size += (v.len() - r) + (if r == 0 { 0 } else { SLOT_SIZE });
             }
             Pass::Head { .. } => {
                 let iter = v.chunks_exact(SLOT_SIZE);
@@ -678,8 +704,11 @@ where
         if name == MARK_DYNAMIC_NAME {
             trace("serialize_unit_struct (mark dynamic)", &self.pass);
             match self.pass {
-                Pass::HeadSize(_) => {
-                    self.is_fake_dynamic = true;
+                Pass::HeadSize {
+                    ref mut is_fake_dynamic,
+                    ..
+                } => {
+                    *is_fake_dynamic = true;
                 }
                 Pass::Head { .. } => {}
                 Pass::TailSize(_) => {}
@@ -702,7 +731,7 @@ where
         T: Serialize,
     {
         trace("serialize_newtype_struct", &self.pass);
-        self.serialize_tuple_element(Some(name), value)
+        self.serialize_tuple_element(Some(name), value, 0)
     }
 
     fn serialize_newtype_variant<T: ?Sized>(
@@ -721,20 +750,14 @@ where
 
     fn serialize_seq(self, size: Option<usize>) -> Result<Self::SerializeSeq> {
         trace("serialize_seq", &self.pass);
-
-        // TODO: Check if the following statement is still true
-        // This Serializer only works if the data type can provide the size in
-        // advance. If this becomes too problematic in the future we could
-        // detect the None case here and write the fields in Pass::Tail. This
-        // has a performance penalty because we need to loop over the fields
-        // twice, but would not panic. On the other hand, sequences that cannot
-        // provide a size in advance are most likely iterators and thus we might
-        // not be able to iterate over the sequence twice.
-
         match self.pass {
-            Pass::HeadSize(ref mut head_size) => {
-                self.is_dynamic = true;
-                *head_size += SLOT_SIZE;
+            Pass::HeadSize {
+                ref mut size,
+                ref mut is_dynamic,
+                ..
+            } => {
+                *is_dynamic = true;
+                *size += SLOT_SIZE;
             }
             Pass::Head { .. } => {
                 self.write_right_aligned(size.unwrap().to_be_bytes());
@@ -768,7 +791,7 @@ where
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
         trace("serialize_tuple_variant", &self.pass);
-        todo!()
+        Err(Error::TypeNotRepresentable("struct variant"))
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap> {
@@ -798,11 +821,9 @@ where
         T: core::fmt::Display,
     {
         trace("collect_str", &self.pass);
-        todo!()
+        unimplemented!()
     }
 }
-
-// TODO: See what the compiler actually does after optimization.
 
 impl<'a, 'b, W> SerializeSeq for &'a mut Serializer<'b, W>
 where
@@ -817,88 +838,10 @@ where
         T: Serialize,
     {
         trace("Seq: serialize_element", &self.pass);
-        // TODO: Upon closer inspection this looks almost exactly like
-        // serialize_tupler_element, with the only difference that
-        // element_head_size is/should be the same for all values in the
-        // sequence, but this isn't implemented and may be optimized by the
-        // compiler anyways. Replace this by a call to serialize_tuple_element
-        // for code-deduplication with none or a negligible performance cost.
-
-        match self.pass {
-            Pass::HeadSize(ref mut head_size) => {
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                *head_size += if is_dyn && !is_fake_dynamic {
-                    SLOT_SIZE
-                } else {
-                    element_head_size
-                };
-                Ok(())
-            }
-            Pass::Head { offset } => {
-                // For some Ridiculous reason the length of the array is not
-                // part of the offset according to the output of solidity.
-                // TODO: Find out why!
-                let seq_offset = offset - SLOT_SIZE;
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                if is_dyn && !is_fake_dynamic {
-                    self.write_right_aligned(seq_offset.to_be_bytes());
-                    explain!("element offset (HEAD)");
-
-                    self.pass = Pass::Head {
-                        offset: offset + element_head_size + self.get_tail_size(&value)?,
-                    };
-                    Ok(())
-                } else {
-                    // This offset should not matter at all, because the offset
-                    // is never used since (by definition) none of the
-                    // underlying types can be dynamic. Conceptually, this
-                    // should be element_head_size, like in Pass::Tail. It
-                    // indicates the base offset (due to the head size) for all
-                    // offsets in that serializer.
-                    self.serialize(
-                        &value,
-                        Pass::Head {
-                            offset: element_head_size,
-                        },
-                    )
-                }
-            }
-            Pass::TailSize(size) => {
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                let element_tail_size = self.get_tail_size(&value)?;
-                self.pass = Pass::TailSize(
-                    // TODO: Does the element_head_size matter? It should.
-                    size + if is_dyn && !is_fake_dynamic {
-                        element_head_size
-                    } else {
-                        0
-                    } + element_tail_size,
-                );
-                Ok(())
-            }
-            Pass::Tail => {
-                let (element_head_size, is_dyn, is_fake_dynamic) = compute_size(&value)?;
-                if is_dyn && !is_fake_dynamic {
-                    // This offset might be counter intuitive (I've thought
-                    // about it wrong multiple times). It does NOT have an
-                    // affect on the sequence this element is part of but
-                    // instead on all children of the element. As in the
-                    // to_writer function we have to give the Serializer the
-                    // head size of the value it should serialize, otherwise it
-                    // does not know where the dynamic part (Tail) begins and
-                    // thus cannot write offsets in Pass::Head.
-                    self.serialize(
-                        &value,
-                        Pass::Head {
-                            offset: element_head_size,
-                        },
-                    )?;
-                    self.serialize(&value, Pass::Tail)
-                } else {
-                    Ok(())
-                }
-            }
-        }
+        // The sequence length (written in Pass::Head) is not part of the offset
+        // calculation for sequence elements, see comment inside of
+        // serialize_tuple_element.
+        self.serialize_tuple_element(None, value, SLOT_SIZE)
     }
 
     fn end(self) -> Result<()> {
@@ -920,7 +863,7 @@ where
         T: Serialize,
     {
         trace("Tuple: serialize_element", &self.pass);
-        self.serialize_tuple_element(None, value)
+        self.serialize_tuple_element(None, value, 0)
     }
 
     fn end(self) -> Result<()> {
@@ -942,7 +885,7 @@ where
         T: Serialize,
     {
         trace("TupleStruct: serialize_field", &self.pass);
-        self.serialize_tuple_element(None, value)
+        self.serialize_tuple_element(None, value, 0)
     }
 
     fn end(self) -> Result<()> {
@@ -963,11 +906,11 @@ where
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_tuple_variant never returns Ok")
     }
 
     fn end(self) -> Result<()> {
-        todo!()
+        unreachable!("Because serialize_tuple_variant never returns Ok")
     }
 }
 
@@ -983,18 +926,18 @@ where
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_map never returns Ok")
     }
 
     fn serialize_value<T: ?Sized>(&mut self, _value: &T) -> Result<()>
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_map never returns Ok")
     }
 
     fn end(self) -> Result<()> {
-        todo!()
+        unreachable!("Because serialize_map never returns Ok")
     }
 }
 
@@ -1011,7 +954,7 @@ where
         T: Serialize,
     {
         trace("Struct: serialize_field", &self.pass);
-        self.serialize_tuple_element(Some(name), value)
+        self.serialize_tuple_element(Some(name), value, 0)
     }
 
     fn end(self) -> Result<()> {
@@ -1032,10 +975,10 @@ where
     where
         T: Serialize,
     {
-        todo!()
+        unreachable!("Because serialize_struct_variant never returns Ok")
     }
 
     fn end(self) -> Result<()> {
-        todo!()
+        unreachable!("Because serialize_struct_variant never returns Ok")
     }
 }

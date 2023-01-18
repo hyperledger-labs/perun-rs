@@ -16,7 +16,7 @@ use crate::{
         types::{Address, U256},
     },
     messages::{LedgerChannelProposal, LedgerChannelProposalAcc, ParticipantMessage},
-    wire::MessageBus,
+    wire::{BroadcastMessageBus, MessageBus},
     PerunClient,
 };
 use alloc::string::ToString;
@@ -84,14 +84,13 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         withdraw_receiver: Address,
         prop: LedgerChannelProposal,
     ) -> Self {
-        let c = ProposedChannel {
+        ProposedChannel {
             part_id: part_id,
             withdraw_receiver,
             client: client,
             proposal: prop,
             responses: [None],
-        };
-        c
+        }
     }
 
     /// Accept a proposed channel and reply to the participants.
@@ -113,9 +112,11 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             participant: address,
         };
         self.responses[self.part_id - 1] = Some(acc);
-        self.client
-            .bus
-            .send_to_participants(ParticipantMessage::ProposalAccepted(acc));
+        self.client.bus.broadcast_to_participants(
+            self.part_id,
+            &self.proposal.peers,
+            ParticipantMessage::ProposalAccepted(acc),
+        );
 
         Ok(())
     }
@@ -125,12 +126,14 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     /// Drops the ProposedChannel object because using it no longer makes sense,
     /// as we have rejected the proposal.
     pub fn reject(self, reason: &str) {
-        self.client
-            .bus
-            .send_to_participants(ParticipantMessage::ProposalRejected {
+        self.client.bus.broadcast_to_participants(
+            self.part_id,
+            &self.proposal.peers,
+            ParticipantMessage::ProposalRejected {
                 id: self.proposal.proposal_id,
                 reason: reason.to_string(),
-            });
+            },
+        );
     }
 
     /// Call this when receiving an Accept response form a participant.
@@ -212,6 +215,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             self.withdraw_receiver,
             init_state,
             params,
+            self.proposal.peers,
         ))
     }
 }

@@ -1,4 +1,4 @@
-use super::{active::ActiveChannel, fixed_size_payment, PartID};
+use super::{active::ActiveChannel, fixed_size_payment, PartID, Peers};
 use crate::{
     abiencode::types::{Hash, Signature},
     wire::MessageBus,
@@ -21,6 +21,7 @@ impl<'a, B: MessageBus> SignedChannel<'a, B> {
         init_state: State,
         params: Params,
         signatures: [Signature; PARTICIPANTS],
+        peers: Peers,
     ) -> Self {
         SignedChannel(ActiveChannel::new(
             client,
@@ -29,6 +30,7 @@ impl<'a, B: MessageBus> SignedChannel<'a, B> {
             init_state,
             params,
             signatures,
+            peers,
         ))
     }
 

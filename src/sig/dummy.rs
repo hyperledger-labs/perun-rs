@@ -4,8 +4,6 @@
 //! Used during development to avoid compiler errors while no no_std compatible
 //! signing library is added.
 
-// TODO: Remove this once we've added k256 for no_std.
-
 use crate::abiencode::types::{Address, Hash, Signature};
 
 #[derive(Debug)]

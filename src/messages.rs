@@ -63,7 +63,7 @@ pub enum FunderReplyMessage {
 }
 
 /// Messages sent between participants of a channel.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParticipantMessage {
     Auth,
     ChannelProposal(LedgerChannelProposal),

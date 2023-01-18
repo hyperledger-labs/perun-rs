@@ -1,4 +1,5 @@
 mod address;
+mod bytes;
 mod bytes_in;
 mod bytescontainer;
 mod dynstruct_in;
@@ -6,6 +7,7 @@ mod simple;
 mod solidity_docs;
 mod static_in;
 mod staticstruct_in;
+mod string;
 
 use super::*;
 use serde::Serialize;
@@ -194,6 +196,3 @@ impl Bytes for BytesViaNormalAttr {
         }
     }
 }
-
-// TODO: Various variants mixed
-// TODO: Some arrays with more elements, some with zero
