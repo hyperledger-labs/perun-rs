@@ -29,7 +29,22 @@ type SimpleWallet struct {
 var _ accounts.Wallet = (*SimpleWallet)(nil)
 
 func (w *SimpleWallet) GenerateNewAccount() accounts.Account {
-	sk, _ := crypto.GenerateKey()
+	sk, err := crypto.GenerateKey()
+	if err != nil {
+		panic(err)
+	}
+	return w.add(sk)
+}
+
+func (w *SimpleWallet) ImportFromSecretKeyHex(hexkey string) accounts.Account {
+	sk, err := crypto.HexToECDSA(hexkey)
+	if err != nil {
+		panic(err)
+	}
+	return w.add(sk)
+}
+
+func (w *SimpleWallet) add(sk *ecdsa.PrivateKey) accounts.Account {
 	addr := crypto.PubkeyToAddress(sk.PublicKey)
 	account := accounts.Account{Address: addr}
 

@@ -11,10 +11,12 @@ Watching the blockchain for disputes and for funding a new channel.
 cargo test --all-features
 
 # Run go-integration example/walkthrough (run in separate terminals)
+# Ganache is optional, if it isn't running we're using the SimulatedBackend.
+ganache -e 100000000000000 -s 1024 -b 5
 cd examples/go-integration; go run . ; cd -
 cargo run --example go-integration
 
-# Run Example/Walkthrough (can be configured at the top with constants)
+# Run old Example/Walkthrough (can be configured at the top with constants)
 cargo run --example lowlevel_basic_channel
 
 # Compile without std (the example above requires std)
