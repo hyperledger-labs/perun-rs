@@ -3,7 +3,7 @@
 
 extern crate alloc;
 
-mod abiencode {
+pub mod abiencode {
     mod error;
     mod hashing;
     mod ser;
