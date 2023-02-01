@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	remote "go-integration/perun-remote"
 	"math/big"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 	ethchannel "github.com/perun-network/perun-eth-backend/channel"
 	ethwallet "github.com/perun-network/perun-eth-backend/wallet"
@@ -49,38 +51,74 @@ func ToWei(value int64, denomination string) *big.Int {
 	return new(big.Int).Mul(big.NewInt(value), big.NewInt(m))
 }
 
-func main() {
-	perunlogrus.Set(logrus.TraceLevel, &logrus.TextFormatter{})
+func setup_blockchain(accounts ...accounts.Account) (ethchannel.ContractInterface, *big.Int) {
+	contract_interface, chain_id, err := setup_ganache(accounts...)
+	if err != nil {
+		fmt.Printf("Using SimulatedBackend (fallback) because we could not connect to ganache: %v\n", err)
+		return setup_simbackend(accounts...)
+	}
+	fmt.Println("Using Ganache")
+	return contract_interface, chain_id
+}
 
-	w := NewSimpleWallet()
-	adjudicator_account := w.GenerateNewAccount()
-	deployer_account := w.GenerateNewAccount()
-	funder_account := w.GenerateNewAccount()
-
-	// Setup the simulated backend + wrappers around them
+func setup_simbackend(accounts ...accounts.Account) (ethchannel.ContractInterface, *big.Int) {
+	genesis_alloc := make(core.GenesisAlloc, len(accounts))
+	for _, acc := range accounts {
+		genesis_alloc[acc.Address] = core.GenesisAccount{Balance: ToWei(1_000_000, "ether")}
+	}
 	sb := backends.NewSimulatedBackend(
-		core.GenesisAlloc{
-			adjudicator_account.Address: {Balance: ToWei(1_000_000, "ether")},
-			deployer_account.Address:    {Balance: ToWei(1_000_000, "ether")},
-			funder_account.Address:      {Balance: ToWei(1_000_000, "ether")},
-		},
+		genesis_alloc,
 		30_000_000,
 	)
-	chain_id := sb.Blockchain().Config().ChainID
-	cb := ethchannel.NewContractBackend(
-		sb,
-		ethchannel.MakeChainID(chain_id),
-		NewChainIdAwareTransactor(w, chain_id),
-		1,
-	)
-
-	channel.RegisterDefaultApp(&payment.Resolver{})
 	go func() {
 		for {
 			sb.Commit()
 			time.Sleep(2000 * time.Millisecond)
 		}
 	}()
+	chain_id := sb.Blockchain().Config().ChainID
+	return sb, chain_id
+}
+
+func setup_ganache(accounts ...accounts.Account) (ethchannel.ContractInterface, *big.Int, error) {
+	contract_interface, err := ethclient.Dial("ws://127.0.0.1:8545")
+	if err != nil {
+		return nil, nil, fmt.Errorf("Could not dial: %w", err)
+	}
+	chain_id, err := contract_interface.ChainID(context.Background())
+	if err != nil {
+		return nil, nil, fmt.Errorf("Could not get chainID: %w", err)
+	}
+	return contract_interface, chain_id, nil
+}
+
+func main() {
+	perunlogrus.Set(logrus.TraceLevel, &logrus.TextFormatter{})
+
+	w := NewSimpleWallet()
+
+	// Wallet/Accounts
+	// Command to run ganache:
+	// `ganache-cli -e 100000000000000 -b 5 -s 1024`
+	not_so_private_keys := []string{
+		"0xf59fcb369b2caf390bf8398b18e4172ce85ef01111903b603f3b3e1f33e80050",
+		"0x4bcebba3fc0cc4fdc2bfb6c10ac2cbf85367a75f2921a75bb76b9440616c87e4",
+		"0xec951c901d6b68a8e3b0faf34ef93d0e03d219efd6a0d996ebaf140632a465fd",
+	}
+	adjudicator_account := w.ImportFromSecretKeyHex(not_so_private_keys[0][2:])
+	deployer_account := w.ImportFromSecretKeyHex(not_so_private_keys[1][2:])
+	funder_account := w.ImportFromSecretKeyHex(not_so_private_keys[2][2:])
+
+	contract_interface, chain_id := setup_blockchain(adjudicator_account, deployer_account, funder_account)
+
+	cb := ethchannel.NewContractBackend(
+		contract_interface,
+		ethchannel.MakeChainID(chain_id),
+		NewChainIdAwareTransactor(w, chain_id),
+		1,
+	)
+
+	channel.RegisterDefaultApp(&payment.Resolver{})
 
 	// Deploy contracts
 	adjAddr, err := ethchannel.DeployAdjudicator(context.Background(), cb, deployer_account)
