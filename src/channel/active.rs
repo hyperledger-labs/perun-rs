@@ -22,10 +22,16 @@ type Params = fixed_size_payment::Params<PARTICIPANTS>;
 #[derive(Debug)]
 pub enum ProposeUpdateError {
     AbiEncodeError(abiencode::Error),
+    InvalidUpdate(InvalidUpdate),
 }
 impl From<abiencode::Error> for ProposeUpdateError {
     fn from(e: abiencode::Error) -> Self {
         Self::AbiEncodeError(e)
+    }
+}
+impl From<InvalidUpdate> for ProposeUpdateError {
+    fn from(e: InvalidUpdate) -> Self {
+        Self::InvalidUpdate(e)
     }
 }
 
@@ -34,8 +40,7 @@ pub enum HandleUpdateError {
     AbiEncodeError(abiencode::Error),
     RecoveryFailed(sig::Error),
     InvalidSignature(Address),
-    InvalidChannelID,
-    InvalidVersionNumber,
+    InvalidUpdate(InvalidUpdate),
 }
 impl From<abiencode::Error> for HandleUpdateError {
     fn from(e: abiencode::Error) -> Self {
@@ -46,6 +51,20 @@ impl From<sig::Error> for HandleUpdateError {
     fn from(e: sig::Error) -> Self {
         Self::RecoveryFailed(e)
     }
+}
+impl From<InvalidUpdate> for HandleUpdateError {
+    fn from(e: InvalidUpdate) -> Self {
+        Self::InvalidUpdate(e)
+    }
+}
+
+#[derive(Debug)]
+pub enum InvalidUpdate {
+    InvalidChannelID,
+    InvalidVersionNumber,
+    CurrentStateIsFinal,
+    AssetsMismatch,
+    TotalAllocationAmountMismatch,
 }
 
 #[derive(Debug)]
@@ -69,6 +88,8 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         signatures: [Signature; PARTICIPANTS],
         peers: Peers,
     ) -> Self {
+        debug_assert!(part_id < params.participants.len());
+
         ActiveChannel {
             part_id,
             client,
@@ -104,12 +125,30 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         self.params
     }
 
+    fn check_valid_transition(&self, new_state: State) -> Result<(), InvalidUpdate> {
+        debug_assert_eq!(new_state.outcome.locked.len(), 0, "At the moment we don't support subchannels and thus don't represent locked balances. This assert exists for when we do add it, thus warning us if this 'we don't have locked values' assumption changes. If it does: Go-Perun asserts that the `SubAlloc` (locked values) are equivalent and did not change, see `validTwoPartyUpdate`.");
+        new_state.outcome.debug_assert_valid();
+
+        if new_state.channel_id() != self.state.channel_id() {
+            Err(InvalidUpdate::InvalidChannelID)
+        } else if self.state.is_final {
+            Err(InvalidUpdate::CurrentStateIsFinal)
+        } else if new_state.version() != self.state.version() + 1 {
+            Err(InvalidUpdate::InvalidVersionNumber)
+        } else if new_state.outcome.assets != self.state.outcome.assets {
+            Err(InvalidUpdate::AssetsMismatch)
+        } else if new_state.outcome.total_assets() != self.state.outcome.total_assets() {
+            Err(InvalidUpdate::TotalAllocationAmountMismatch)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn update<'ch>(
         &'ch mut self,
         new_state: State,
     ) -> Result<ChannelUpdate<'ch, 'cl, B>, ProposeUpdateError> {
-        // TODO: Verify a few things about the state (like no creation of new
-        // assets).
+        self.check_valid_transition(new_state)?;
 
         // Sign immediately, we need the signature to send the proposal.
         let hash = abiencode::to_hash(&new_state)?;
@@ -131,12 +170,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         &'ch mut self,
         msg: LedgerChannelUpdate,
     ) -> Result<ChannelUpdate<'ch, 'cl, B>, HandleUpdateError> {
-        if msg.state.channel_id() != self.state.channel_id() {
-            return Err(HandleUpdateError::InvalidChannelID);
-        }
-        if msg.state.version() != self.state.version() + 1 {
-            return Err(HandleUpdateError::InvalidVersionNumber);
-        }
+        self.check_valid_transition(msg.state)?;
 
         let hash = abiencode::to_hash(&msg.state)?;
         let signer = self.client.signer.recover_signer(hash, msg.sig)?;

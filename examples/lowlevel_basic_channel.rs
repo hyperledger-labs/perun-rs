@@ -124,7 +124,7 @@ async fn alice(bus: Bus) {
     // after withdrawing. The on-chain part is not modelled in this
     // example => We can set it to anything (random or, as in this case
     // 0x00)
-    let mut channel = client.propose_channel(prop, Address::default());
+    let mut channel = client.propose_channel(prop, Address::default()).unwrap();
     match bus.rx.recv().unwrap() {
         ParticipantMessage::ProposalAccepted(msg) => {
             channel.participant_accepted(1, msg).unwrap();
@@ -247,7 +247,7 @@ async fn bob(bus: Bus) {
             // after withdrawing. The on-chain part is not modelled in this
             // example => We can set it to anything (random or, as in this case
             // 0x00)
-            client.handle_proposal(prop, Address::default())
+            client.handle_proposal(prop, Address::default()).unwrap()
         }
         _ => panic!("Unexpected message"),
     };
