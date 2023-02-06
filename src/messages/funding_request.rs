@@ -1,6 +1,6 @@
 use super::ConversionError;
 use crate::{
-    channel::{fixed_size_payment, PartID},
+    channel::{fixed_size_payment, PartIdx},
     perunwire,
 };
 
@@ -12,7 +12,7 @@ type Balances = fixed_size_payment::Balances<ASSETS, PARTICIPANTS>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelFundingRequest {
-    pub part_id: PartID,
+    pub part_idx: PartIdx,
     pub funding_agreement: Balances,
     pub params: Params,
     pub state: State,
@@ -23,7 +23,7 @@ impl TryFrom<perunwire::FundingRequestMsg> for LedgerChannelFundingRequest {
 
     fn try_from(value: perunwire::FundingRequestMsg) -> Result<Self, Self::Error> {
         Ok(Self {
-            part_id: value.participant as usize,
+            part_idx: value.participant as usize,
             funding_agreement: value
                 .funding_agreement
                 .ok_or(ConversionError::ExptectedSome)?
@@ -46,7 +46,7 @@ impl From<LedgerChannelFundingRequest> for perunwire::FundingRequestMsg {
             funding_agreement: Some(value.funding_agreement.into()),
             params: Some(value.params.into()),
             initial_state: Some(value.state.into()),
-            participant: value.part_id as u32,
+            participant: value.part_idx as u32,
         }
     }
 }

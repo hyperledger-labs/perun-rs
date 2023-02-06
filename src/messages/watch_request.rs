@@ -1,7 +1,7 @@
 use super::ConversionError;
 use crate::{
     abiencode::types::Signature,
-    channel::{fixed_size_payment, PartID},
+    channel::{fixed_size_payment, PartIdx},
     perunwire, Address,
 };
 
@@ -12,7 +12,7 @@ type Params = fixed_size_payment::Params<PARTICIPANTS>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct WatchInfo {
-    pub part_id: PartID,
+    pub part_idx: PartIdx,
     pub params: Params,
     pub state: State,
     pub signatures: [Signature; PARTICIPANTS],
@@ -43,7 +43,7 @@ impl TryFrom<perunwire::WatchRequestMsg> for WatchInfo {
         }
 
         Ok(Self {
-            part_id: value.participant as usize,
+            part_idx: value.participant as usize,
             params: signed_state
                 .params
                 .ok_or(ConversionError::ExptectedSome)?
@@ -61,7 +61,7 @@ impl TryFrom<perunwire::WatchRequestMsg> for WatchInfo {
 impl From<WatchInfo> for perunwire::WatchRequestMsg {
     fn from(value: WatchInfo) -> Self {
         Self {
-            participant: value.part_id as u32,
+            participant: value.part_idx as u32,
             state: Some(perunwire::SignedState {
                 params: Some(value.params.into()),
                 state: Some(value.state.into()),

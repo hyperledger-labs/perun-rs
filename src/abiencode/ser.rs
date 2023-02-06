@@ -492,7 +492,7 @@ where
     type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<()> {
-        self.serialize_u8(v as u8)
+        self.serialize_u8(v.into())
     }
 
     fn serialize_i8(self, v: i8) -> Result<()> {

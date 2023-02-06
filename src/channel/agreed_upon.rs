@@ -2,7 +2,7 @@ use super::{
     fixed_size_payment::{self},
     signed::SignedChannel,
     withdrawal_auth::make_signed_withdrawal_auths,
-    PartID, Peers,
+    PartIdx, Peers,
 };
 use crate::{
     abiencode::{
@@ -57,7 +57,7 @@ impl From<sig::Error> for AddSignatureError {
 
 #[derive(Debug)]
 pub enum BuildError {
-    MissingSignatureResponse(PartID),
+    MissingSignatureResponse(PartIdx),
     AbiEncodeError(abiencode::Error),
 }
 impl From<abiencode::Error> for BuildError {
@@ -68,7 +68,7 @@ impl From<abiencode::Error> for BuildError {
 
 #[derive(Debug)]
 pub struct AgreedUponChannel<'a, B: MessageBus> {
-    part_id: PartID,
+    part_idx: PartIdx,
     withdraw_receiver: Address,
     client: &'a PerunClient<B>,
     funding_agreement: Balances,
@@ -82,14 +82,14 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
     pub(super) fn new(
         client: &'a PerunClient<B>,
         funding_agreement: Balances,
-        part_id: PartID,
+        part_idx: PartIdx,
         withdraw_receiver: Address,
         init_state: State,
         params: Params,
         peers: Peers,
     ) -> Self {
         AgreedUponChannel {
-            part_id,
+            part_idx,
             client,
             withdraw_receiver,
             funding_agreement,
@@ -101,17 +101,17 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
     }
 
     pub fn sign(&mut self) -> Result<(), SignError> {
-        match self.signatures[self.part_id] {
+        match self.signatures[self.part_idx] {
             Some(_) => Err(SignError::AlreadySigned),
             None => {
                 // Sign the initial state
                 let hash = abiencode::to_hash(&self.init_state)?;
                 let sig = self.client.signer.sign_eth(hash);
                 // Add signature to the proposed channel
-                self.signatures[self.part_id] = Some(sig);
+                self.signatures[self.part_idx] = Some(sig);
                 // Send to other participants
                 self.client.bus.broadcast_to_participants(
-                    self.part_id,
+                    self.part_idx,
                     &self.peers,
                     ParticipantMessage::ChannelUpdateAccepted(LedgerChannelUpdateAccepted {
                         channel: self.init_state.channel_id(),
@@ -152,7 +152,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         // to do that). On the other side, Rust would allow multiple
         // participants with the same wire identity (which doesn't really make
         // sense either).
-        let (part_id, _) = self
+        let (part_idx, _) = self
             .params
             .participants
             .iter()
@@ -160,10 +160,10 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             .find(|(_, &addr)| addr == signer)
             .ok_or(AddSignatureError::InvalidSignature(signer))?;
 
-        match self.signatures[part_id] {
+        match self.signatures[part_idx] {
             Some(_) => Err(AddSignatureError::AlreadySigned),
             None => {
-                self.signatures[part_id] = Some(msg.sig);
+                self.signatures[part_idx] = Some(msg.sig);
                 Ok(())
             }
         }
@@ -175,14 +175,14 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         // with `sign()`. At the same time, this loop collects the signatures
         // for the next phase into an array.
         let mut signatures: [Signature; PARTICIPANTS] = [Signature::default(); PARTICIPANTS];
-        for (part_id, s) in self.signatures.iter().enumerate() {
-            signatures[part_id] = s.ok_or(BuildError::MissingSignatureResponse(part_id))?;
+        for (part_idx, s) in self.signatures.iter().enumerate() {
+            signatures[part_idx] = s.ok_or(BuildError::MissingSignatureResponse(part_idx))?;
         }
 
         self.client
             .bus
             .send_to_watcher(WatcherRequestMessage::WatchRequest(WatchInfo {
-                part_id: self.part_id,
+                part_idx: self.part_idx,
                 params: self.params,
                 state: self.init_state,
                 signatures,
@@ -192,7 +192,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                     self.params,
                     self.init_state,
                     self.withdraw_receiver,
-                    self.part_id,
+                    self.part_idx,
                 )?,
             }));
 
@@ -200,7 +200,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
             .bus
             .send_to_funder(FunderRequestMessage::FundingRequest(
                 LedgerChannelFundingRequest {
-                    part_id: self.part_id,
+                    part_idx: self.part_idx,
                     funding_agreement: self.funding_agreement,
                     params: self.params,
                     state: self.init_state,
@@ -209,7 +209,7 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
 
         Ok(SignedChannel::new(
             self.client,
-            self.part_id,
+            self.part_idx,
             self.withdraw_receiver,
             self.init_state,
             self.params,

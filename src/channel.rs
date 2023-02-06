@@ -19,10 +19,10 @@ pub use signed::*;
 // Re-exported because it is part of the low-level channel API
 pub use crate::messages::LedgerChannelProposal;
 
-/// ID (Index) of a participant in the channel.
+/// Index of a participant in the channel.
 ///
 /// `0` is the proposer of the channel.
-pub type PartID = usize;
+pub type PartIdx = usize;
 
 /// The nonce added by each participant.
 ///
