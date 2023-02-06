@@ -7,7 +7,7 @@ use crate::{
     Address, Hash,
 };
 
-use super::{fixed_size_payment, PartID};
+use super::{fixed_size_payment, PartIdx};
 
 const ASSETS: usize = 1;
 const PARTICIPANTS: usize = 2;
@@ -28,7 +28,7 @@ pub fn make_signed_withdrawal_auths(
     params: Params,
     state: State,
     withdraw_receiver: Address,
-    part_id: PartID,
+    part_idx: PartIdx,
 ) -> Result<[SignedWithdrawalAuth; ASSETS], abiencode::Error> {
     let mut withdrawal_auths = [SignedWithdrawalAuth::default(); ASSETS];
 
@@ -38,9 +38,9 @@ pub fn make_signed_withdrawal_auths(
     for (auth, bals) in withdrawal_auths.iter_mut().zip(state.outcome.balances.0) {
         let sig = signer.sign_eth(abiencode::to_hash(&WithdrawalAuth {
             channel_id,
-            participant: params.participants[part_id],
+            participant: params.participants[part_idx],
             receiver: withdraw_receiver,
-            amount: bals.0[part_id],
+            amount: bals.0[part_idx],
         })?);
         *auth = SignedWithdrawalAuth {
             sig,

@@ -7,6 +7,10 @@ Watching the blockchain for disputes and for funding a new channel.
 
 ## Getting started
 ```bash
+# Initialize submodules
+git submodule init
+git submodule update
+
 # Execute all tests
 cargo test --all-features
 

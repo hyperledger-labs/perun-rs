@@ -8,7 +8,7 @@
 use super::{
     agreed_upon::AgreedUponChannel,
     fixed_size_payment::{self},
-    NonceShare, PartID,
+    NonceShare, PartIdx,
 };
 use crate::{
     abiencode::{
@@ -41,7 +41,7 @@ pub enum HandleAcceptError {
 #[derive(Debug)]
 pub enum BuildError {
     AbiEncodeError(abiencode::Error),
-    MissingAccResponse(PartID),
+    MissingAccResponse(PartIdx),
 }
 impl From<abiencode::Error> for BuildError {
     fn from(e: abiencode::Error) -> Self {
@@ -57,7 +57,7 @@ impl From<abiencode::Error> for BuildError {
 #[derive(Debug)]
 pub struct ProposedChannel<'a, B: MessageBus> {
     /// Who are we in this channel (0 is the channel proposer).
-    part_id: PartID,
+    part_idx: PartIdx,
     /// Who should receive funds when withdrawing
     withdraw_receiver: Address,
     /// Reference to the PerunClient, used for communication.
@@ -80,12 +80,12 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     /// message to all participants.
     pub(crate) fn new(
         client: &'a PerunClient<B>,
-        part_id: PartID,
+        part_idx: PartIdx,
         withdraw_receiver: Address,
         proposal: LedgerChannelProposal,
     ) -> Self {
         ProposedChannel {
-            part_id,
+            part_idx,
             withdraw_receiver,
             client,
             proposal,
@@ -106,7 +106,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         // trying to unlock the corresponding wallet.
         assert_eq!(address, self.client.signer.address(), "We have to be able to sign things with this address and the current implementation is only able to have a single singer address. It is still part of the accept function signature because this will probably change in the future and this change would be backwards incompatible.");
 
-        if self.part_id == 0 || self.responses[self.part_id - 1].is_some() {
+        if self.part_idx == 0 || self.responses[self.part_idx - 1].is_some() {
             return Err(AlreadyAcceptedError);
         }
 
@@ -115,9 +115,9 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             nonce_share,
             participant: address,
         };
-        self.responses[self.part_id - 1] = Some(acc);
+        self.responses[self.part_idx - 1] = Some(acc);
         self.client.bus.broadcast_to_participants(
-            self.part_id,
+            self.part_idx,
             &self.proposal.peers,
             ParticipantMessage::ProposalAccepted(acc),
         );
@@ -131,7 +131,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     /// as we have rejected the proposal.
     pub fn reject(self, reason: &str) {
         self.client.bus.broadcast_to_participants(
-            self.part_id,
+            self.part_idx,
             &self.proposal.peers,
             ParticipantMessage::ProposalRejected {
                 id: self.proposal.proposal_id,
@@ -149,14 +149,14 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     /// dropped.
     pub fn participant_accepted(
         &mut self,
-        part_id: PartID,
+        part_idx: PartIdx,
         msg: LedgerChannelProposalAcc,
     ) -> Result<(), HandleAcceptError> {
         if msg.proposal_id != self.proposal.proposal_id {
             return Err(HandleAcceptError::InvalidProposalID);
         }
 
-        let index = part_id - 1;
+        let index = part_idx - 1;
         match self.responses[index] {
             Some(_) => Err(HandleAcceptError::AlreadyAccepted),
             None => {
@@ -224,7 +224,7 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         Ok(AgreedUponChannel::new(
             self.client,
             self.proposal.funding_agreement,
-            self.part_id,
+            self.part_idx,
             self.withdraw_receiver,
             init_state,
             params,

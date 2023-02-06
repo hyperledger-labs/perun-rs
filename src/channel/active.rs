@@ -1,7 +1,7 @@
 use super::{
     channel_update::ChannelUpdate,
     fixed_size_payment::{self},
-    withdrawal_auth, PartID, Peers, SignError,
+    withdrawal_auth, PartIdx, Peers, SignError,
 };
 use crate::{
     abiencode::{
@@ -69,7 +69,7 @@ pub enum InvalidUpdate {
 
 #[derive(Debug)]
 pub struct ActiveChannel<'a, B: MessageBus> {
-    part_id: PartID,
+    part_idx: PartIdx,
     withdraw_receiver: Address,
     client: &'a PerunClient<B>,
     state: State,
@@ -81,17 +81,17 @@ pub struct ActiveChannel<'a, B: MessageBus> {
 impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub(super) fn new(
         client: &'cl PerunClient<B>,
-        part_id: PartID,
+        part_idx: PartIdx,
         withdraw_receiver: Address,
         init_state: State,
         params: Params,
         signatures: [Signature; PARTICIPANTS],
         peers: Peers,
     ) -> Self {
-        debug_assert!(part_id < params.participants.len());
+        debug_assert!(part_idx < params.participants.len());
 
         ActiveChannel {
-            part_id,
+            part_idx,
             client,
             state: init_state,
             params,
@@ -109,8 +109,8 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         self.state
     }
 
-    pub fn part_id(&self) -> PartID {
-        self.part_id
+    pub fn part_idx(&self) -> PartIdx {
+        self.part_idx
     }
 
     pub fn client(&self) -> &PerunClient<B> {
@@ -154,16 +154,16 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         let hash = abiencode::to_hash(&new_state)?;
         let sig = self.client.signer.sign_eth(hash);
         self.client.bus.broadcast_to_participants(
-            self.part_id,
+            self.part_idx,
             &self.peers,
             ParticipantMessage::ChannelUpdate(LedgerChannelUpdate {
                 state: new_state,
-                actor_idx: self.part_id,
+                actor_idx: self.part_idx,
                 sig,
             }),
         );
 
-        Ok(ChannelUpdate::new(self, new_state, self.part_id, sig))
+        Ok(ChannelUpdate::new(self, new_state, self.part_idx, sig))
     }
 
     pub fn handle_update<'ch>(
@@ -228,11 +228,11 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
             self.params,
             self.state,
             self.withdraw_receiver,
-            self.part_id,
+            self.part_idx,
         )?;
 
         Ok(WatchInfo {
-            part_id: self.part_id,
+            part_idx: self.part_idx,
             params: self.params,
             state: self.state,
             signatures: self.signatures,

@@ -21,6 +21,7 @@ tokio = { version = "1.23.0", features = ["full"] }
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"]}
 cortex-m-rt = "0.7.2"
 cortex-m-semihosting = "0.5.0"
+# panic-halt = "0.2.0"
 panic-semihosting = "0.6.0"
 embedded-alloc = "0.5.0"
 

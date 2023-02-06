@@ -1,5 +1,5 @@
 use super::{
-    active::ActiveChannel, agreed_upon::AddSignatureError, fixed_size_payment, PartID, SignError,
+    active::ActiveChannel, agreed_upon::AddSignatureError, fixed_size_payment, PartIdx, SignError,
 };
 use crate::{
     abiencode::{self, types::Signature},
@@ -26,7 +26,7 @@ impl From<abiencode::Error> for AcceptError {
 
 #[derive(Debug)]
 pub enum ApplyError {
-    MissingSignature(PartID),
+    MissingSignature(PartIdx),
     SignError(SignError),
 }
 impl From<SignError> for ApplyError {
@@ -46,11 +46,11 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
     pub(crate) fn new(
         channel: &'ch mut ActiveChannel<'cl, B>,
         new_state: State,
-        sig_part_id: PartID,
+        sig_part_idx: PartIdx,
         sig: Signature,
     ) -> Self {
         let mut signatures = [None; PARTICIPANTS];
-        signatures[sig_part_id] = Some(sig);
+        signatures[sig_part_idx] = Some(sig);
         ChannelUpdate {
             channel,
             new_state,
@@ -59,7 +59,7 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
     }
 
     pub fn accept(&mut self) -> Result<(), AcceptError> {
-        match self.signatures[self.channel.part_id()] {
+        match self.signatures[self.channel.part_idx()] {
             Some(_) => Err(AcceptError::AlreadyAccepted),
             None => {
                 let hash = abiencode::to_hash(&self.new_state)?;
@@ -70,9 +70,9 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
                     version: self.new_state.version(),
                     sig,
                 };
-                self.signatures[self.channel.part_id()] = Some(sig);
+                self.signatures[self.channel.part_idx()] = Some(sig);
                 self.channel.client().bus.broadcast_to_participants(
-                    self.channel.part_id(),
+                    self.channel.part_idx(),
                     self.channel.peers(),
                     ParticipantMessage::ChannelUpdateAccepted(acc),
                 );
@@ -83,7 +83,7 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
 
     pub fn reject(self, reason: &str) {
         self.channel.client().bus.broadcast_to_participants(
-            self.channel.part_id(),
+            self.channel.part_idx(),
             self.channel.peers(),
             ParticipantMessage::ChannelUpdateRejected {
                 id: self.channel.channel_id(),
@@ -95,7 +95,7 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
 
     pub fn participant_accepted(
         &mut self,
-        part_id: PartID,
+        part_idx: PartIdx,
         msg: LedgerChannelUpdateAccepted,
     ) -> Result<(), AddSignatureError> {
         if msg.channel != self.channel.channel_id() {
@@ -108,14 +108,14 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
         let hash = abiencode::to_hash(&self.new_state)?;
         let signer = self.channel.client().signer.recover_signer(hash, msg.sig)?;
 
-        if self.channel.params().participants[part_id] != signer {
+        if self.channel.params().participants[part_idx] != signer {
             return Err(AddSignatureError::InvalidSignature(signer));
         }
 
-        match self.signatures[part_id] {
+        match self.signatures[part_idx] {
             Some(_) => Err(AddSignatureError::AlreadySigned),
             None => {
-                self.signatures[part_id] = Some(msg.sig);
+                self.signatures[part_idx] = Some(msg.sig);
                 Ok(())
             }
         }
@@ -123,8 +123,8 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
 
     fn signatures(&self) -> Result<[Signature; PARTICIPANTS], ApplyError> {
         let mut signatures: [Signature; PARTICIPANTS] = [Signature::default(); PARTICIPANTS];
-        for (part_id, s) in self.signatures.iter().enumerate() {
-            signatures[part_id] = s.ok_or(ApplyError::MissingSignature(part_id))?;
+        for (part_idx, s) in self.signatures.iter().enumerate() {
+            signatures[part_idx] = s.ok_or(ApplyError::MissingSignature(part_idx))?;
         }
 
         Ok(signatures)

@@ -1,7 +1,7 @@
 use super::ConversionError;
 use crate::{
     abiencode::types::{Hash, Signature},
-    channel::{fixed_size_payment, PartID},
+    channel::{fixed_size_payment, PartIdx},
     perunwire,
 };
 
@@ -12,7 +12,7 @@ type State = fixed_size_payment::State<ASSETS, PARTICIPANTS>;
 #[derive(Debug, Clone, Copy)]
 pub struct LedgerChannelUpdate {
     pub state: State,
-    pub actor_idx: PartID,
+    pub actor_idx: PartIdx,
     pub sig: Signature,
 }
 

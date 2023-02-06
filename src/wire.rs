@@ -5,7 +5,7 @@ use core::fmt::Debug;
 pub use encoding::ProtoBufEncodingLayer;
 
 use crate::{
-    channel::{PartID, Peers},
+    channel::{PartIdx, Peers},
     messages::{FunderRequestMessage, ParticipantMessage, WatcherRequestMessage},
 };
 
@@ -28,14 +28,14 @@ pub trait MessageBus: Debug {
 }
 
 pub trait BroadcastMessageBus: MessageBus {
-    fn broadcast_to_participants(&self, part_id: PartID, peers: &Peers, msg: ParticipantMessage);
+    fn broadcast_to_participants(&self, part_idx: PartIdx, peers: &Peers, msg: ParticipantMessage);
 }
 
 impl<B: MessageBus> BroadcastMessageBus for B {
-    fn broadcast_to_participants(&self, part_id: PartID, peers: &Peers, msg: ParticipantMessage) {
-        let sender = &peers[part_id];
+    fn broadcast_to_participants(&self, part_idx: PartIdx, peers: &Peers, msg: ParticipantMessage) {
+        let sender = &peers[part_idx];
         for (i, peer) in peers.iter().enumerate() {
-            if i == part_id {
+            if i == part_idx {
                 continue;
             }
 
