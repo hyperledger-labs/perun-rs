@@ -23,6 +23,7 @@ compile_error!("When running this example in no_std add the feature flag 'nostd-
 // Panic handler
 #[cfg(not(feature = "std"))]
 use panic_semihosting as _;
+// use panic_halt as _;
 
 // Global allocator
 #[cfg(not(feature = "std"))]
@@ -41,7 +42,7 @@ use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use cortex_m_rt::entry;
 #[cfg(not(feature = "std"))]
-use cortex_m_semihosting::{debug, hprint};
+use cortex_m_semihosting::hprint;
 
 // Make it runnable in qemu
 #[cfg(not(feature = "std"))]
