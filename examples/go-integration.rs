@@ -42,7 +42,7 @@ use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use cortex_m_rt::entry;
 #[cfg(not(feature = "std"))]
-use cortex_m_semihosting::hprint;
+use cortex_m_semihosting::{debug, hprint};
 
 // Make it runnable in qemu
 #[cfg(not(feature = "std"))]

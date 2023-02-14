@@ -1,3 +1,8 @@
+[workspace]
+members = [
+    "cortex-m-demo"
+]
+
 [package]
 name = "perun"
 version = "0.0.1"
