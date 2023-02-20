@@ -10,6 +10,8 @@ edition = "2021"
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.2"
 panic-halt = "0.2.0"
+embedded-alloc = "0.5.0"
 rand_core = "0.6.4"
 stm32-eth = { version = "0.4.1", features = ["stm32f429", "smoltcp-phy"] }
 smoltcp = { version = "0.8.2", default-features = false, features = ["socket-tcp", "proto-ipv4", "medium-ethernet"] }
+perun = { version = "0.0.1", path = "../", default-features = false, features = ["k256"] }

@@ -1,13 +1,13 @@
 #![no_main]
 #![no_std]
+#![feature(default_alloc_error_handler)]
+
+mod channel;
 
 use core::cell::RefCell;
 
 use cortex_m::{interrupt::Mutex, peripheral::SYST};
 use cortex_m_rt::{entry, exception};
-
-// Panic handler
-use panic_halt as _;
 use rand_core::RngCore;
 use smoltcp::{
     iface::{InterfaceBuilder, NeighborCache},
@@ -27,9 +27,26 @@ use stm32_eth::{
     EthPins,
 };
 
-#[cfg(not(feature = "std"))]
+// Panic handler
+use panic_halt as _;
+
+extern crate alloc;
+
+// Global allocator
+use embedded_alloc::Heap;
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+
 #[entry]
 fn entry() -> ! {
+    // Initialize the allocator BEFORE you use it
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 2048;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+    }
+
     main();
     loop {}
 }
