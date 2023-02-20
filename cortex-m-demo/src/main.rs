@@ -2,10 +2,12 @@
 #![no_std]
 #![feature(default_alloc_error_handler)]
 
+mod application;
 mod channel;
 
 use core::cell::RefCell;
 
+use application::{Application, Config};
 use cortex_m::{interrupt::Mutex, peripheral::SYST};
 use cortex_m_rt::{entry, exception};
 use rand_core::RngCore;
@@ -21,7 +23,6 @@ use stm32_eth::{
         gpio::{self, PinState},
         hal::digital::v2::IoPin,
         prelude::*,
-        rng::Rng,
     },
     stm32::{CorePeripherals, Peripherals},
     EthPins,
@@ -60,13 +61,6 @@ const MAC_ADDRESS: EthernetAddress = EthernetAddress([0x00, 0x00, 0xDE, 0xAD, 0x
 static TIME: Mutex<RefCell<u64>> = Mutex::new(RefCell::new(0));
 
 type LedOutputPin<const N: u8> = gpio::Pin<'B', N, gpio::Output<gpio::PushPull>>;
-
-fn get_ethemeral_port(rng: &mut Rng) -> u16 {
-    const MIN: u16 = 49152;
-    const MAX: u16 = 65535;
-    // Note: This is not evenly distributed but sufficient for what we need.
-    MIN + (rng.next_u32() as u16) % (MAX - MIN)
-}
 
 fn main() {
     let peripherals = Peripherals::take().unwrap();
@@ -161,19 +155,13 @@ fn main() {
 
     blue_led.set_high(); // Setup finished
 
-    // Connect to the server IP. Does not wait for the handshake to finish.
-    let (socket, cx) = iface.get_socket_and_context::<TcpSocket>(handle);
-    socket
-        .connect(
-            cx,
-            (IpAddress::from(SERVER_IP_ADDRESS), SERVER_PORT),
-            (IpAddress::Unspecified, get_ethemeral_port(hw_rng)),
-        )
-        .unwrap();
+    let config = Config {
+        server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_PORT),
+    };
+    let mut app = Application::new(handle, hw_rng, config);
 
     // main application loop
     let mut last_toggle_time = 0;
-    let mut greeted = false;
     loop {
         // Get the current time
         let time: u64 = cortex_m::interrupt::free(|cs| *TIME.borrow(cs).borrow());
@@ -181,29 +169,12 @@ fn main() {
         // Poll on the network stack
         match iface.poll(Instant::from_millis(time as i64)) {
             Ok(_) => {}
+            Err(_) => green_led.set_high(),
+        }
+
+        match app.poll(&mut iface) {
+            Ok(_) => {}
             Err(_) => red_led.set_high(),
-        }
-
-        let socket = iface.get_socket::<TcpSocket>(handle);
-
-        // echo service to test sending and receiving of data. This echo service
-        // will break if the other side does not read from the socket in time.
-        // Since this is only intended for testing it should be fine. If it
-        // would be a problem we could query the amount of available rx and tx
-        // buffer space and only read then write that amount to not panic at one
-        // of the unwraps below.
-        if socket.can_send() && !greeted {
-            socket
-                .send_slice("Write anything and I'll reply\n".as_bytes())
-                .unwrap();
-            greeted = true;
-        }
-        if socket.can_recv() {
-            let mut buf = [0u8; 128];
-            socket.recv_slice(&mut buf).unwrap();
-            socket.send_slice("Reply: ".as_bytes()).unwrap();
-            socket.send_slice(&buf).unwrap();
-            green_led.toggle();
         }
 
         // Toggle the blue LED every second
