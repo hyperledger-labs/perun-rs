@@ -518,7 +518,10 @@ fn main() {
     print_bold!("Alice done");
 }
 
-fn handle_update_response<'a, 'b, B: MessageBus>(bus: &Bus, mut update: ChannelUpdate<'a, 'b, B>) {
+fn handle_update_response<'cl, 'ch, B: MessageBus>(
+    bus: &Bus,
+    mut update: ChannelUpdate<'cl, 'ch, B>,
+) {
     match bus.recv_envelope().msg {
         Some(envelope::Msg::ChannelUpdateAccMsg(msg)) => {
             update

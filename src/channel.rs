@@ -10,6 +10,7 @@ use crate::abiencode::types::{Address, Bytes32, U256};
 use alloc::vec::Vec;
 use serde::Serialize;
 
+pub use active::*;
 pub use agreed_upon::*;
 pub use channel_update::*;
 pub use channel_update::*;

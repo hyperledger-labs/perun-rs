@@ -11,11 +11,11 @@ type State = fixed_size_payment::State<ASSETS, PARTICIPANTS>;
 type Params = fixed_size_payment::Params<PARTICIPANTS>;
 
 #[derive(Debug)]
-pub struct SignedChannel<'a, B: MessageBus>(ActiveChannel<'a, B>);
+pub struct SignedChannel<'cl, B: MessageBus>(ActiveChannel<'cl, B>);
 
-impl<'a, B: MessageBus> SignedChannel<'a, B> {
+impl<'cl, B: MessageBus> SignedChannel<'cl, B> {
     pub(super) fn new(
-        client: &'a PerunClient<B>,
+        client: &'cl PerunClient<B>,
         part_idx: PartIdx,
         withdraw_receiver: Address,
         init_state: State,
@@ -34,7 +34,7 @@ impl<'a, B: MessageBus> SignedChannel<'a, B> {
         ))
     }
 
-    pub fn mark_funded(self) -> ActiveChannel<'a, B> {
+    pub fn mark_funded(self) -> ActiveChannel<'cl, B> {
         self.0
     }
 

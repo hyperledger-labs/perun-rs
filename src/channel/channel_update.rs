@@ -36,13 +36,13 @@ impl From<SignError> for ApplyError {
 }
 
 #[derive(Debug)]
-pub struct ChannelUpdate<'ch, 'cl, B: MessageBus> {
+pub struct ChannelUpdate<'cl, 'ch, B: MessageBus> {
     channel: &'ch mut ActiveChannel<'cl, B>,
     new_state: State,
     signatures: [Option<Signature>; PARTICIPANTS],
 }
 
-impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
+impl<'cl, 'ch, B: MessageBus> ChannelUpdate<'cl, 'ch, B> {
     pub(crate) fn new(
         channel: &'ch mut ActiveChannel<'cl, B>,
         new_state: State,
@@ -130,9 +130,14 @@ impl<'ch, 'cl, B: MessageBus> ChannelUpdate<'ch, 'cl, B> {
         Ok(signatures)
     }
 
-    pub fn apply(self) -> Result<(), ApplyError> {
-        self.channel
-            .force_update(self.new_state, self.signatures()?)?;
-        Ok(())
+    pub fn apply(self) -> Result<(), (Self, ApplyError)> {
+        let signatures = match self.signatures() {
+            Ok(v) => v,
+            Err(e) => return Err((self, e)),
+        };
+        match self.channel.force_update(self.new_state, signatures) {
+            Ok(_) => Ok(()),
+            Err(e) => Err((self, e.into())),
+        }
     }
 }
