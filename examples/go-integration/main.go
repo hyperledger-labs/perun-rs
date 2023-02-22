@@ -176,7 +176,7 @@ func main() {
 	}
 	var updateHandler client.UpdateHandler = UpdateHandler{}
 
-	listener, err := simple.NewTCPListener("127.0.0.1:1337")
+	listener, err := simple.NewTCPListener(":1337")
 	if err != nil {
 		panic(err)
 	}
@@ -199,7 +199,7 @@ func main() {
 		// information like the ETH holder address. (needed for this example,
 		// we're assuming the application already knows these values (for now
 		// at least))
-		l, err := net.Listen("tcp", "127.0.0.1:1339")
+		l, err := net.Listen("tcp", ":1339")
 		if err != nil {
 			panic(err)
 		}
@@ -209,6 +209,8 @@ func main() {
 				panic(err)
 			}
 
+			// Note that using two `conn.Write` calls here is not ideal, as it
+			// causes two separate 20-byte payload TCP segments.
 			_, err = conn.Write(eth_holder.Bytes())
 			if err != nil {
 				panic(err)
@@ -217,6 +219,8 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
+
+			conn.Close()
 		}
 	}()
 

@@ -3,13 +3,17 @@
 #![feature(default_alloc_error_handler)]
 
 mod application;
+mod bus;
 mod channel;
 
-use core::cell::RefCell;
+use core::{borrow::Borrow, cell::RefCell};
 
 use application::{Application, Config};
+use bus::Bus;
 use cortex_m::{interrupt::Mutex, peripheral::SYST};
 use cortex_m_rt::{entry, exception};
+use perun::{sig::Signer, wire::ProtoBufEncodingLayer, PerunClient};
+use rand::{rngs::StdRng, SeedableRng};
 use rand_core::RngCore;
 use smoltcp::{
     iface::{InterfaceBuilder, NeighborCache},
@@ -54,7 +58,8 @@ fn entry() -> ! {
 
 const IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 2);
 const SERVER_IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 1);
-const SERVER_PORT: u16 = 1337;
+const SERVER_CONFIG_PORT: u16 = 1339;
+const SERVER_PARTICIPANT_PORT: u16 = 1337;
 const CIDR_PREFIX_LEN: u8 = 24;
 const MAC_ADDRESS: EthernetAddress = EthernetAddress([0x00, 0x00, 0xDE, 0xAD, 0xBE, 0xEF]);
 
@@ -112,6 +117,7 @@ fn main() {
 
     // Random Number generation
     let hw_rng = &mut peripherals.RNG.constrain(&clocks);
+    let mut crypt_rng = StdRng::seed_from_u64(hw_rng.next_u64());
 
     // Configure IP Interface: smoltcp v0.8.2
     // At the moment we need to use the old version because stm32-eth hasn't
@@ -156,25 +162,53 @@ fn main() {
     blue_led.set_high(); // Setup finished
 
     let config = Config {
-        server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_PORT),
+        config_server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_CONFIG_PORT),
+        other_participant: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_PARTICIPANT_PORT),
+        participants: ["Alice", "Bob"],
     };
-    let mut app = Application::new(handle, hw_rng, config);
+
+    // Move the interface into a RefCell because we need a mutable reference in
+    // the main loop below, in app and in bus. (Having one in app could be
+    // avoided by always passing in the interface, but that is effort and will
+    // cause problems when calling methods on the channel, which call functions
+    // on the bus and thus need to mutably borrow the interface, too).
+    let iface = &RefCell::new(iface);
+
+    let bus = Bus { iface, handle };
+    // We need/want randomness for signing and for generating the ephemeral
+    // port numbers. Creating a new RNG from the one we got is the easiest
+    // way to do so, allowing both to have ownership of a RNG though it is
+    // not the same. According to
+    // https://rust-random.github.io/book/guide-rngs.html the cost of doing
+    // this is small, as initialization is fast and the RNGs internal state
+    // is 136 bytes (StdRng currently uses ChaCha12).
+    let mut rng2 = StdRng::seed_from_u64(hw_rng.next_u64());
+    let signer = Signer::new(&mut rng2);
+    let addr = signer.address();
+    let client = PerunClient::new(ProtoBufEncodingLayer { bus }, signer);
+    let mut app = Application::new(handle, config, rng2, addr, &client, green_led, iface);
 
     // main application loop
     let mut last_toggle_time = 0;
+    let mut stop = false;
     loop {
         // Get the current time
         let time: u64 = cortex_m::interrupt::free(|cs| *TIME.borrow(cs).borrow());
 
         // Poll on the network stack
-        match iface.poll(Instant::from_millis(time as i64)) {
+        match iface.borrow_mut().poll(Instant::from_millis(time as i64)) {
             Ok(_) => {}
-            Err(_) => green_led.set_high(),
+            Err(_) => {}
         }
 
-        match app.poll(&mut iface) {
-            Ok(_) => {}
-            Err(_) => red_led.set_high(),
+        if !stop {
+            match app.poll() {
+                Ok(_) => {}
+                Err(_) => {
+                    red_led.set_high();
+                    stop = true;
+                }
+            }
         }
 
         // Toggle the blue LED every second

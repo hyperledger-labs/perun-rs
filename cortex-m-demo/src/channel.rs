@@ -8,7 +8,7 @@
 use alloc::string::String;
 use perun::{
     abiencode::types::U256,
-    channel,
+    channel::{self, ProposedChannel},
     messages::{FunderReplyMessage, ParticipantMessage, WatcherReplyMessage},
     wire::MessageBus,
 };
@@ -113,6 +113,12 @@ impl From<channel::ApplyError> for Error {
 }
 
 impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
+    pub fn new(channel: ProposedChannel<'cl, B>) -> Self {
+        Self {
+            inner: ChannelInner::Proposed(channel),
+        }
+    }
+
     /// Progress the inner state machine with the logic given in f.
     ///
     /// # Safety

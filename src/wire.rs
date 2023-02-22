@@ -1,7 +1,6 @@
 mod encoding;
 
 use alloc::vec::Vec;
-use core::fmt::Debug;
 pub use encoding::ProtoBufEncodingLayer;
 
 use crate::{
@@ -11,7 +10,7 @@ use crate::{
 
 pub type Identity = Vec<u8>;
 
-pub trait BytesBus: Debug {
+pub trait BytesBus {
     fn send_to_watcher(&self, msg: &[u8]);
     fn send_to_funder(&self, msg: &[u8]);
     fn send_to_participant(&self, sender: &Identity, recipient: &Identity, msg: &[u8]);
@@ -21,7 +20,7 @@ pub trait BytesBus: Debug {
 ///
 /// Might be moved into a byte based MessageBus or behind a `unstable` feature
 /// flag.
-pub trait MessageBus: Debug {
+pub trait MessageBus {
     fn send_to_watcher(&self, msg: WatcherRequestMessage);
     fn send_to_funder(&self, msg: FunderRequestMessage);
     fn send_to_participant(&self, sender: &Identity, recipient: &Identity, msg: ParticipantMessage);
