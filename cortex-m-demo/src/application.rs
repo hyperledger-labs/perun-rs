@@ -13,10 +13,10 @@ use perun::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
         Asset,
     },
-    messages::LedgerChannelProposal,
+    messages::{ConversionError, LedgerChannelProposal, ParticipantMessage},
     perunwire::{envelope::Msg, Envelope},
     wire::ProtoBufEncodingLayer,
-    Address, InvalidProposal, PerunClient,
+    Address, Hash, InvalidProposal, PerunClient,
 };
 use prost::{DecodeError, Message};
 use rand::{rngs::StdRng, Rng};
@@ -28,7 +28,11 @@ use smoltcp::{
     wire::IpAddress,
 };
 
-use crate::{bus::Bus, channel::Channel, LedOutputPin};
+use crate::{
+    bus::Bus,
+    channel::{self, Channel},
+    LedOutputPin,
+};
 
 /// Configuration for the demo: Peers and where to find the
 /// participant/watcher/funder.
@@ -84,6 +88,10 @@ pub enum Error {
     Network(smoltcp::Error),
     InvalidProposal(InvalidProposal),
     ProstDecode(DecodeError),
+    EnvelopeHasNoMsg,
+    UnexpectedMsg,
+    ConversionError(ConversionError),
+    ChannelError(channel::Error),
 }
 
 impl From<smoltcp::Error> for Error {
@@ -99,6 +107,16 @@ impl From<InvalidProposal> for Error {
 impl From<prost::DecodeError> for Error {
     fn from(e: prost::DecodeError) -> Self {
         Self::ProstDecode(e)
+    }
+}
+impl From<ConversionError> for Error {
+    fn from(e: ConversionError) -> Self {
+        Self::ConversionError(e)
+    }
+}
+impl From<channel::Error> for Error {
+    fn from(e: channel::Error) -> Self {
+        Self::ChannelError(e)
     }
 }
 
@@ -317,6 +335,64 @@ where
         Ok(())
     }
 
+    fn try_recv_participant_msg(&mut self) -> Result<Option<ParticipantMessage>, Error> {
+        let env = match self.try_recv_envelope()? {
+            Some(env) => env,
+            None => return Ok(None),
+        };
+        let msg = match env.msg {
+            Some(m) => m,
+            None => return Err(Error::EnvelopeHasNoMsg),
+        };
+        let msg = match msg {
+            Msg::PingMsg(_) => unimplemented!(),
+            Msg::PongMsg(_) => unimplemented!(),
+            Msg::ShutdownMsg(_) => unimplemented!(),
+            Msg::AuthResponseMsg(_) => return Err(Error::UnexpectedMsg),
+            Msg::LedgerChannelProposalMsg(_) => return Err(Error::UnexpectedMsg), // Possible in the library but this Application does not support incoming requests.
+            Msg::LedgerChannelProposalAccMsg(m) => {
+                ParticipantMessage::ProposalAccepted(m.try_into()?)
+            }
+            Msg::SubChannelProposalMsg(m) => unimplemented!(),
+            Msg::SubChannelProposalAccMsg(_) => unimplemented!(),
+            Msg::VirtualChannelProposalMsg(_) => unimplemented!(),
+            Msg::VirtualChannelProposalAccMsg(_) => unimplemented!(),
+            Msg::ChannelProposalRejMsg(m) => ParticipantMessage::ProposalRejected {
+                id: Hash(m.proposal_id.try_into().unwrap()),
+                reason: m.reason,
+            },
+            Msg::ChannelUpdateMsg(m) => ParticipantMessage::ChannelUpdate(m.try_into()?),
+            Msg::VirtualChannelFundingProposalMsg(_) => unimplemented!(),
+            Msg::VirtualChannelSettlementProposalMsg(_) => unimplemented!(),
+            Msg::ChannelUpdateAccMsg(m) => ParticipantMessage::ChannelUpdateAccepted(m.try_into()?),
+            Msg::ChannelUpdateRejMsg(m) => ParticipantMessage::ChannelUpdateRejected {
+                id: Hash(m.channel_id.try_into().unwrap()),
+                version: m.version,
+                reason: m.reason,
+            },
+            Msg::ChannelSyncMsg(_) => unimplemented!(),
+        };
+        Ok(Some(msg))
+    }
+
+    fn forward_messages_to_channel(&mut self) -> Result<(), Error> {
+        // First try receiving all the possible messages
+        let participant_msg = self.try_recv_participant_msg()?;
+
+        // Now get the (mutable) channel object so we don't get issues with mutability.
+        let channel = match self.state {
+            ApplicationState::Active { ref mut channel } => channel,
+            _ => unreachable!("This function is only called when in Active"),
+        };
+
+        // Apply messages
+        match participant_msg {
+            Some(msg) => channel.process_participant_msg(msg)?,
+            None => {}
+        }
+        Ok(())
+    }
+
     // echo service to test sending and receiving of data. This echo service
     // will break if the other side does not read from the socket in time.
     // Since this is only intended for testing it should be fine. If it
@@ -339,7 +415,7 @@ where
                 eth_holder,
                 withdraw_receiver,
             } => self.wait_handshake_and_propose_channel(eth_holder, withdraw_receiver),
-            ApplicationState::Active { .. } => Ok(()),
+            ApplicationState::Active { .. } => self.forward_messages_to_channel(),
         }
     }
 
