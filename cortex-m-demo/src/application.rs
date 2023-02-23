@@ -13,8 +13,11 @@ use perun::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
         Asset,
     },
-    messages::{ConversionError, LedgerChannelProposal, ParticipantMessage},
-    perunwire::{envelope::Msg, Envelope},
+    messages::{
+        ConversionError, FunderReplyMessage, LedgerChannelProposal, ParticipantMessage,
+        WatcherReplyMessage,
+    },
+    perunwire::{self, envelope::Msg, Envelope},
     wire::ProtoBufEncodingLayer,
     Address, Hash, InvalidProposal, PerunClient,
 };
@@ -116,6 +119,11 @@ impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Self::ChannelError(e)
     }
+}
+
+enum ServiceReplyMessage {
+    Watcher(WatcherReplyMessage),
+    Funder(FunderReplyMessage),
 }
 
 impl<'cl: 'ch, 'ch, DeviceT> Application<'cl, 'ch, DeviceT>
@@ -263,9 +271,9 @@ where
         Ok(())
     }
 
-    fn try_recv_envelope(&mut self) -> Result<Option<Envelope>, Error> {
+    fn try_recv<T: Message + Default>(&mut self, handle: SocketHandle) -> Result<Option<T>, Error> {
         let mut iface = self.iface.borrow_mut();
-        let socket = iface.get_socket::<TcpSocket>(self.participant_handle);
+        let socket = iface.get_socket::<TcpSocket>(handle);
 
         // Only receive complete packets
         let env = socket.recv(|x| {
@@ -283,7 +291,7 @@ where
             if x.len() < 2 + length {
                 return (0, None);
             }
-            let env = Envelope::decode(&x[2..2 + length]);
+            let env = T::decode(&x[2..2 + length]);
             (2 + length, Some(env))
         })?;
 
@@ -301,7 +309,7 @@ where
     ) -> Result<(), Error> {
         // Only continue if we have a complete package and there was no decoding
         // error.
-        let env = match self.try_recv_envelope()? {
+        let env: Envelope = match self.try_recv(self.participant_handle)? {
             Some(env) => env,
             None => return Ok(()),
         };
@@ -351,7 +359,7 @@ where
     }
 
     fn try_recv_participant_msg(&mut self) -> Result<Option<ParticipantMessage>, Error> {
-        let env = match self.try_recv_envelope()? {
+        let env: Envelope = match self.try_recv(self.participant_handle)? {
             Some(env) => env,
             None => return Ok(None),
         };
@@ -390,9 +398,49 @@ where
         Ok(Some(msg))
     }
 
+    fn try_recv_service_msg(&mut self) -> Result<Option<ServiceReplyMessage>, Error> {
+        let env: perunwire::Message = match self.try_recv(self.service_handle)? {
+            Some(env) => env,
+            None => return Ok(None),
+        };
+        let msg = match env.msg {
+            Some(m) => m,
+            None => return Err(Error::EnvelopeHasNoMsg),
+        };
+        let msg = match msg {
+            perunwire::message::Msg::FundingRequest(_) => unimplemented!(),
+            perunwire::message::Msg::FundingResponse(m) => {
+                ServiceReplyMessage::Funder(FunderReplyMessage::Funded {
+                    id: Hash(m.channel_id.try_into().unwrap()),
+                })
+            }
+            perunwire::message::Msg::WatchRequest(_) => unimplemented!(),
+            perunwire::message::Msg::WatchResponse(m) => {
+                ServiceReplyMessage::Watcher(WatcherReplyMessage::Ack {
+                    id: Hash(m.channel_id.try_into().unwrap()),
+                    version: m.version,
+                })
+            }
+            perunwire::message::Msg::ForceCloseRequest(_) => unimplemented!(),
+            perunwire::message::Msg::ForceCloseResponse(m) => {
+                ServiceReplyMessage::Watcher(WatcherReplyMessage::DisputeAck {
+                    id: Hash(m.channel_id.try_into().unwrap()),
+                })
+            }
+            perunwire::message::Msg::DisputeNotification(m) => {
+                ServiceReplyMessage::Watcher(WatcherReplyMessage::DisputeNotification {
+                    id: Hash(m.channel_id.try_into().unwrap()),
+                })
+            }
+        };
+
+        Ok(Some(msg))
+    }
+
     fn forward_messages_to_channel(&mut self) -> Result<(), Error> {
         // First try receiving all the possible messages
         let participant_msg = self.try_recv_participant_msg()?;
+        let service_msg = self.try_recv_service_msg()?;
 
         // Now get the (mutable) channel object so we don't get issues with mutability.
         let channel = match self.state {
@@ -400,11 +448,16 @@ where
             _ => unreachable!("This function is only called when in Active"),
         };
 
-        // Apply messages
+        // Apply messages. Note that processing multiple messages in one pass
+        // may be problematic, as that could (in theory) result in the need for
+        // larger tx buffers.
         match participant_msg {
-            Some(msg) => {
-                channel.process_participant_msg(msg)?;
-            }
+            Some(msg) => channel.process_participant_msg(msg)?,
+            None => {}
+        }
+        match service_msg {
+            Some(ServiceReplyMessage::Funder(msg)) => channel.process_funder_reply(msg)?,
+            Some(ServiceReplyMessage::Watcher(msg)) => channel.process_watcher_reply(msg)?,
             None => {}
         }
         Ok(())
