@@ -6,7 +6,7 @@ mod application;
 mod bus;
 mod channel;
 
-use core::{borrow::Borrow, cell::RefCell};
+use core::cell::RefCell;
 
 use application::{Application, Config};
 use bus::Bus;
@@ -91,7 +91,7 @@ fn main() {
     let gpiog = peripherals.GPIOG.split();
 
     // LEDs
-    let mut green_led: LedOutputPin<0> = gpiob.pb0.into_output_pin(PinState::Low).unwrap();
+    // let mut green_led: LedOutputPin<0> = gpiob.pb0.into_output_pin(PinState::Low).unwrap();
     let mut blue_led: LedOutputPin<7> = gpiob.pb7.into_output_pin(PinState::Low).unwrap();
     let mut red_led: LedOutputPin<14> = gpiob.pb14.into_output_pin(PinState::Low).unwrap();
 
@@ -118,7 +118,6 @@ fn main() {
 
     // Random Number generation
     let hw_rng = &mut peripherals.RNG.constrain(&clocks);
-    let mut crypt_rng = StdRng::seed_from_u64(hw_rng.next_u64());
 
     // Configure IP Interface: smoltcp v0.8.2
     // At the moment we need to use the old version because stm32-eth hasn't
@@ -210,7 +209,6 @@ fn main() {
         rng2,
         addr,
         &client,
-        green_led,
         iface,
     );
 

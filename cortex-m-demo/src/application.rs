@@ -31,7 +31,6 @@ use smoltcp::{
 use crate::{
     bus::Bus,
     channel::{self, Channel},
-    LedOutputPin,
 };
 
 /// Configuration for the demo: Peers and where to find the
@@ -57,9 +56,6 @@ where
     rng: StdRng,
     client: &'cl PerunClient<ProtoBufEncodingLayer<Bus<'cl, DeviceT>>>,
     addr: Address,
-
-    // TODO: Remove this debugging LED
-    green_led: LedOutputPin<0>,
 }
 
 /// Enum to represent the states the Application can be in.
@@ -133,7 +129,6 @@ where
         rng: StdRng,
         addr: Address,
         client: &'cl PerunClient<ProtoBufEncodingLayer<Bus<'cl, DeviceT>>>,
-        green_led: LedOutputPin<0>,
         iface: &'cl RefCell<Interface<'cl, DeviceT>>,
     ) -> Self {
         Self {
@@ -144,7 +139,6 @@ where
             rng,
             client,
             addr,
-            green_led,
             iface,
         }
     }
@@ -374,7 +368,7 @@ where
             Msg::LedgerChannelProposalAccMsg(m) => {
                 ParticipantMessage::ProposalAccepted(m.try_into()?)
             }
-            Msg::SubChannelProposalMsg(m) => unimplemented!(),
+            Msg::SubChannelProposalMsg(_) => unimplemented!(),
             Msg::SubChannelProposalAccMsg(_) => unimplemented!(),
             Msg::VirtualChannelProposalMsg(_) => unimplemented!(),
             Msg::VirtualChannelProposalAccMsg(_) => unimplemented!(),
@@ -409,10 +403,7 @@ where
         // Apply messages
         match participant_msg {
             Some(msg) => {
-                self.green_led.set_high();
-                let res = channel.process_participant_msg(msg);
-                self.green_led.set_low();
-                res?
+                channel.process_participant_msg(msg)?;
             }
             None => {}
         }
