@@ -60,6 +60,7 @@ const IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 2);
 const SERVER_IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 1);
 const SERVER_CONFIG_PORT: u16 = 1339;
 const SERVER_PARTICIPANT_PORT: u16 = 1337;
+const SERVER_SERVICE_PORT: u16 = 1338;
 const CIDR_PREFIX_LEN: u8 = 24;
 const MAC_ADDRESS: EthernetAddress = EthernetAddress([0x00, 0x00, 0xDE, 0xAD, 0xBE, 0xEF]);
 
@@ -129,7 +130,7 @@ fn main() {
     let mut ip_addrs = [ip_addr];
     let mut neighbor_storage = [None; 16];
     let neighbor_cache = NeighborCache::new(&mut neighbor_storage[..]);
-    let mut sockets: [_; 1] = Default::default();
+    let mut sockets: [_; 2] = Default::default();
     let mut iface = InterfaceBuilder::new(&mut ethernet.dma, &mut sockets[..])
         .random_seed(hw_rng.next_u64())
         .hardware_addr(HardwareAddress::Ethernet(MAC_ADDRESS))
@@ -151,19 +152,31 @@ fn main() {
     */
 
     // Configure TCP socket (and allocate buffers)
-    let mut server_rx_buffer = [0; 512];
-    let mut server_tx_buffer = [0; 512];
-    let socket = TcpSocket::new(
-        TcpSocketBuffer::new(&mut server_rx_buffer[..]),
-        TcpSocketBuffer::new(&mut server_tx_buffer[..]),
+    // Config and Participant communication
+    let mut participant_rx_buffer = [0; 512];
+    let mut participant_tx_buffer = [0; 512];
+    let participant_socket = TcpSocket::new(
+        TcpSocketBuffer::new(&mut participant_rx_buffer[..]),
+        TcpSocketBuffer::new(&mut participant_tx_buffer[..]),
     );
-    let handle = iface.add_socket(socket);
+    let participant_handle = iface.add_socket(participant_socket);
+    // Funder/Watcher communication
+    let mut service_rx_buffer = [0; 512];
+    // service_tx_buffer currently needs to have space for FundingRequestMsg
+    // (388 bytes) and WatchRequestMsg (544 bytes) simultaneosly.
+    let mut service_tx_buffer = [0; 1024];
+    let service_socket = TcpSocket::new(
+        TcpSocketBuffer::new(&mut service_rx_buffer[..]),
+        TcpSocketBuffer::new(&mut service_tx_buffer[..]),
+    );
+    let service_handle = iface.add_socket(service_socket);
 
     blue_led.set_high(); // Setup finished
 
     let config = Config {
         config_server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_CONFIG_PORT),
         other_participant: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_PARTICIPANT_PORT),
+        service_server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_SERVICE_PORT),
         participants: ["Alice", "Bob"],
     };
 
@@ -174,7 +187,11 @@ fn main() {
     // on the bus and thus need to mutably borrow the interface, too).
     let iface = &RefCell::new(iface);
 
-    let bus = Bus { iface, handle };
+    let bus = Bus {
+        iface,
+        participant_handle,
+        service_handle,
+    };
     // We need/want randomness for signing and for generating the ephemeral
     // port numbers. Creating a new RNG from the one we got is the easiest
     // way to do so, allowing both to have ownership of a RNG though it is
@@ -186,7 +203,16 @@ fn main() {
     let signer = Signer::new(&mut rng2);
     let addr = signer.address();
     let client = PerunClient::new(ProtoBufEncodingLayer { bus }, signer);
-    let mut app = Application::new(handle, config, rng2, addr, &client, green_led, iface);
+    let mut app = Application::new(
+        participant_handle,
+        service_handle,
+        config,
+        rng2,
+        addr,
+        &client,
+        green_led,
+        iface,
+    );
 
     // main application loop
     let mut last_toggle_time = 0;

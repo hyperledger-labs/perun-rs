@@ -39,6 +39,7 @@ use crate::{
 pub struct Config {
     pub config_server: (IpAddress, u16),
     pub other_participant: (IpAddress, u16),
+    pub service_server: (IpAddress, u16),
     pub participants: [&'static str; 2],
 }
 
@@ -50,7 +51,8 @@ where
 {
     state: ApplicationState<'cl, 'ch, DeviceT>,
     iface: &'cl RefCell<Interface<'cl, DeviceT>>,
-    handle: SocketHandle,
+    participant_handle: SocketHandle,
+    service_handle: SocketHandle,
     config: Config,
     rng: StdRng,
     client: &'cl PerunClient<ProtoBufEncodingLayer<Bus<'cl, DeviceT>>>,
@@ -125,7 +127,8 @@ where
     DeviceT: for<'d> Device<'d>,
 {
     pub fn new(
-        handle: SocketHandle,
+        participant_handle: SocketHandle,
+        service_handle: SocketHandle,
         config: Config,
         rng: StdRng,
         addr: Address,
@@ -135,7 +138,8 @@ where
     ) -> Self {
         Self {
             state: ApplicationState::InitialState,
-            handle,
+            participant_handle,
+            service_handle,
             config,
             rng,
             client,
@@ -148,7 +152,7 @@ where
     fn connect_config_dealer(&mut self) -> Result<(), Error> {
         // Connect to the server IP. Does not wait for the handshake to finish.
         let mut iface = self.iface.borrow_mut();
-        let (socket, cx) = iface.get_socket_and_context::<TcpSocket>(self.handle);
+        let (socket, cx) = iface.get_socket_and_context::<TcpSocket>(self.participant_handle);
         socket.connect(
             cx,
             self.config.config_server,
@@ -161,7 +165,7 @@ where
 
     fn wait_connected_and_read_config(&mut self) -> Result<(), Error> {
         let mut iface = self.iface.borrow_mut();
-        let socket = iface.get_socket::<TcpSocket>(self.handle);
+        let socket = iface.get_socket::<TcpSocket>(self.participant_handle);
         if socket.is_active() && socket.can_recv() {
             // Try reading from the socket. Returns Err if there is something
             // wrong with the socket (unexpected tcp state). Returns None if not
@@ -191,8 +195,8 @@ where
     // same time.
     fn connect(&mut self, eth_holder: Address, withdraw_receiver: Address) -> Result<(), Error> {
         let mut iface = self.iface.borrow_mut();
-        let (socket, cx) = iface.get_socket_and_context::<TcpSocket>(self.handle);
-        if socket.is_active() {
+        let (psocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.participant_handle);
+        if psocket.is_active() {
             // Only transition to the next state if the socket is free (i.e.
             // closed) and avaliable. Alternatively we could use
             // `socket.abort()`, resulting in a non-graceful shutdown but
@@ -203,9 +207,18 @@ where
             // problem.
             return Ok(());
         }
-        socket.connect(
+        psocket.connect(
             cx,
             self.config.other_participant,
+            (IpAddress::Unspecified, self.get_ethemeral_port()),
+        )?;
+
+        let (ssocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.service_handle);
+        // We don't need to check if the socket is in use because it never is,
+        // we're only using the participant socket for getting the config.
+        ssocket.connect(
+            cx,
+            self.config.service_server,
             (IpAddress::Unspecified, self.get_ethemeral_port()),
         )?;
 
@@ -222,14 +235,22 @@ where
         withdraw_receiver: Address,
     ) -> Result<(), Error> {
         let mut iface = self.iface.borrow_mut();
-        let socket = iface.get_socket::<TcpSocket>(self.handle);
-        if socket.is_active() && socket.may_recv() && socket.may_send() {
+        // Wait for the service socket
+        let ssocket = iface.get_socket::<TcpSocket>(self.service_handle);
+        if !(ssocket.is_active() && ssocket.may_recv() && ssocket.may_send()) {
+            return Ok(());
+        }
+
+        // Wait for the participant socket and send handshake (only transition
+        // if both are ready)
+        let psocket = iface.get_socket::<TcpSocket>(self.participant_handle);
+        if psocket.is_active() && psocket.may_recv() && psocket.may_send() {
             // propose_channel neeeds to be able to borrow the interface to send
             // things on the network. Because of this we need to drop the
             // interface first. Alternatively we could have moved
             // propose_channel to a new state or restructured this function to
             // automatically drop it before calling propose_channel.
-            drop(socket);
+            drop(psocket);
             drop(iface);
 
             // Handshake
@@ -250,7 +271,7 @@ where
 
     fn try_recv_envelope(&mut self) -> Result<Option<Envelope>, Error> {
         let mut iface = self.iface.borrow_mut();
-        let socket = iface.get_socket::<TcpSocket>(self.handle);
+        let socket = iface.get_socket::<TcpSocket>(self.participant_handle);
 
         // Only receive complete packets
         let env = socket.recv(|x| {
@@ -387,7 +408,12 @@ where
 
         // Apply messages
         match participant_msg {
-            Some(msg) => channel.process_participant_msg(msg)?,
+            Some(msg) => {
+                self.green_led.set_high();
+                let res = channel.process_participant_msg(msg);
+                self.green_led.set_low();
+                res?
+            }
             None => {}
         }
         Ok(())

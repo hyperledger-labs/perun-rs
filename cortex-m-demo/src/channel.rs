@@ -244,7 +244,7 @@ impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
             // ProposedChannel
             (ChannelInner::Proposed(mut ch), ParticipantMessage::ProposalAccepted(msg)) => {
                 match ch.participant_accepted(1, msg) {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => return Err((ChannelInner::Proposed(ch), e.into())),
                 }
                 let mut ch = match ch.build() {
@@ -255,20 +255,17 @@ impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
                     Ok(_) => Ok(ChannelInner::AgreedUpon(ch)),
                     Err(e) => unreachable!("We could reach this only by failing to abiencode the state, and there currently is no way to recover from this except for panicing. Error: {e:?}"),
                 }
-
             }
-            (inner @ChannelInner::Proposed(_), ParticipantMessage::ProposalRejected { reason, .. }) => {
-                Err((inner, Error::Rejected { reason }))
-            }
+            (
+                inner @ ChannelInner::Proposed(_),
+                ParticipantMessage::ProposalRejected { reason, .. },
+            ) => Err((inner, Error::Rejected { reason })),
 
             // AgreedUponChannel
-            (
-                ChannelInner::AgreedUpon(mut ch),
-                ParticipantMessage::ChannelUpdateAccepted(msg),
-            ) => {
+            (ChannelInner::AgreedUpon(mut ch), ParticipantMessage::ChannelUpdateAccepted(msg)) => {
                 // ch.add_signature(msg).or_else(|e| Err((ChannelInner::AgreedUpon(ch), e.into())))?;
                 match ch.add_signature(msg) {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => return Err((ChannelInner::AgreedUpon(ch), e.into())),
                 }
                 match ch.build() {
@@ -277,7 +274,7 @@ impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
                 }
             }
             (
-                inner @ChannelInner::AgreedUpon(_),
+                inner @ ChannelInner::AgreedUpon(_),
                 ParticipantMessage::ChannelUpdateRejected { reason, .. },
             ) => Err((inner, Error::Rejected { reason })),
 
@@ -322,33 +319,32 @@ impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
                     Err(e) => return Err((ChannelInner::Active(ch, None), e.into())),
                 };
                 match update.accept() {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => return Err((ChannelInner::Active(ch, None), e.into())),
                 }
                 match update.apply() {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err((_, e)) => return Err((ChannelInner::Active(ch, None), e.into())),
                 }
                 Ok(ChannelInner::Active(ch, None))
             }
-            (ChannelInner::Active(ch, Some(mut update)), ParticipantMessage::ChannelUpdateAccepted(msg)) => {
+            (
+                ChannelInner::Active(ch, Some(mut update)),
+                ParticipantMessage::ChannelUpdateAccepted(msg),
+            ) => {
                 match update.participant_accepted(1, msg) {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => return Err((ChannelInner::Active(ch, Some(update)), e.into())),
                 }
                 match update.apply() {
                     Ok(_) => Ok(ChannelInner::Active(ch, None)),
                     Err((u, e)) => Err((ChannelInner::Active(ch, Some(u)), e.into())),
                 }
-            },
+            }
             (
                 ChannelInner::Active(ch, Some(_)),
-                ParticipantMessage::ChannelUpdateRejected {
-                    ..
-                },
-            ) => {
-                Ok(ChannelInner::Active(ch, None))
-            },
+                ParticipantMessage::ChannelUpdateRejected { .. },
+            ) => Ok(ChannelInner::Active(ch, None)),
             (ChannelInner::TemporaryInvalidState, _) => unreachable!(),
             (inner, _) => Err((inner, Error::InvalidState)),
         })
