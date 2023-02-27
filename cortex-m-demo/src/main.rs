@@ -4,12 +4,14 @@
 
 mod application;
 mod bus;
+mod button;
 mod channel;
 
 use core::cell::RefCell;
 
-use application::{Application, Config};
+use application::{Application, Config, MAX_MESSAGE_SIZE};
 use bus::Bus;
+use button::DebouncedButton;
 use cortex_m::{interrupt::Mutex, peripheral::SYST};
 use cortex_m_rt::{entry, exception};
 use perun::{sig::Signer, wire::ProtoBufEncodingLayer, PerunClient};
@@ -63,6 +65,7 @@ const SERVER_PARTICIPANT_PORT: u16 = 1337;
 const SERVER_SERVICE_PORT: u16 = 1338;
 const CIDR_PREFIX_LEN: u8 = 24;
 const MAC_ADDRESS: EthernetAddress = EthernetAddress([0x00, 0x00, 0xDE, 0xAD, 0xBE, 0xEF]);
+const DEBOUNCE_THRESHHOLD: u64 = 100; // Milliseconds
 
 static TIME: Mutex<RefCell<u64>> = Mutex::new(RefCell::new(0));
 
@@ -91,9 +94,15 @@ fn main() {
     let gpiog = peripherals.GPIOG.split();
 
     // LEDs
-    // let mut green_led: LedOutputPin<0> = gpiob.pb0.into_output_pin(PinState::Low).unwrap();
+    let mut green_led: LedOutputPin<0> = gpiob.pb0.into_output_pin(PinState::Low).unwrap();
     let mut blue_led: LedOutputPin<7> = gpiob.pb7.into_output_pin(PinState::Low).unwrap();
     let mut red_led: LedOutputPin<14> = gpiob.pb14.into_output_pin(PinState::Low).unwrap();
+
+    // Buttons
+    let mut update_btn = DebouncedButton::new(
+        gpioc.pc13.into_pull_down_input().erase(),
+        DEBOUNCE_THRESHHOLD,
+    );
 
     // Ethernet (PHY)
     let eth_pins = EthPins {
@@ -152,15 +161,15 @@ fn main() {
 
     // Configure TCP socket (and allocate buffers)
     // Config and Participant communication
-    let mut participant_rx_buffer = [0; 512];
-    let mut participant_tx_buffer = [0; 512];
+    let mut participant_rx_buffer = [0; MAX_MESSAGE_SIZE + 2];
+    let mut participant_tx_buffer = [0; MAX_MESSAGE_SIZE + 2];
     let participant_socket = TcpSocket::new(
         TcpSocketBuffer::new(&mut participant_rx_buffer[..]),
         TcpSocketBuffer::new(&mut participant_tx_buffer[..]),
     );
     let participant_handle = iface.add_socket(participant_socket);
     // Funder/Watcher communication
-    let mut service_rx_buffer = [0; 512];
+    let mut service_rx_buffer = [0; MAX_MESSAGE_SIZE + 2];
     // service_tx_buffer currently needs to have space for FundingRequestMsg
     // (388 bytes) and WatchRequestMsg (544 bytes) simultaneosly.
     let mut service_tx_buffer = [0; 1024];
@@ -233,6 +242,11 @@ fn main() {
                     stop = true;
                 }
             }
+        }
+
+        if update_btn.is_rising_edge(time) {
+            app.update().unwrap();
+            green_led.toggle();
         }
 
         // Toggle the blue LED every second

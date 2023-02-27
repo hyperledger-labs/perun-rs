@@ -53,6 +53,7 @@ enum ChannelInner<'cl, B: MessageBus> {
     ForceClosed,
 }
 
+#[derive(Debug)]
 pub enum Error {
     InvalidState,
     HandleAccept(channel::HandleAcceptError),
@@ -65,6 +66,7 @@ pub enum Error {
     HandleUpdate(channel::HandleUpdateError),
     Accept(channel::AcceptError),
     ApplyUpdate(channel::ApplyError),
+    NotEnoughFunds,
 }
 impl From<channel::HandleAcceptError> for Error {
     fn from(e: channel::HandleAcceptError) -> Self {
@@ -164,6 +166,9 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
         match self.inner {
             ChannelInner::Active(ref mut ch, ref mut update) => {
                 let mut new_state = ch.state().make_next_state();
+                if new_state.outcome.balances.0[0].0[1] < amount {
+                    return Err(Error::NotEnoughFunds);
+                }
                 new_state.outcome.balances.0[0].0[0] += amount;
                 new_state.outcome.balances.0[0].0[1] -= amount;
                 new_state.is_final = is_final;

@@ -36,6 +36,8 @@ use crate::{
     channel::{self, Channel},
 };
 
+pub const MAX_MESSAGE_SIZE: usize = 510;
+
 /// Configuration for the demo: Peers and where to find the
 /// participant/watcher/funder.
 pub struct Config {
@@ -85,6 +87,7 @@ where
     },
 }
 
+#[derive(Debug)]
 pub enum Error {
     Network(smoltcp::Error),
     InvalidProposal(InvalidProposal),
@@ -94,6 +97,7 @@ pub enum Error {
     ConversionError(ConversionError),
     ChannelError(channel::Error),
     ChannelNotActive,
+    MessageLargerThanRxBuffer(usize),
 }
 
 impl From<smoltcp::Error> for Error {
@@ -273,34 +277,124 @@ where
     }
 
     fn try_recv<T: Message + Default>(&mut self, handle: SocketHandle) -> Result<Option<T>, Error> {
+        // Yes, this function is long when including comments. When not
+        // including them it is still complex, but I have not found a way to do
+        // this without reading everything into a heap-allocated buffer or
+        // storing some information between calls to try_recv using the API
+        // smoltcp currently provides.
         let mut iface = self.iface.borrow_mut();
         let socket = iface.get_socket::<TcpSocket>(handle);
 
-        // Only receive complete packets
-        let env = socket.recv(|x| {
-            // For simplicity of the state machine we're only processing
-            // complete packets when they arrive, even though the go-side
-            // currently sends them in two fragments for some reason. This
-            // packet inspection allows us to look into the rx buffer to see if
-            // we have an entire packet, thus allowing us to process it
-            // atomically so we don't need an extra half-received state.
-            if x.len() < 2 {
-                return (0, None);
-            }
-            let length = u16::from_be_bytes(x[..2].try_into().unwrap());
-            let length: usize = length.into();
-            if x.len() < 2 + length {
-                return (0, None);
-            }
-            let env = T::decode(&x[2..2 + length]);
-            (2 + length, Some(env))
-        })?;
-
-        match env {
-            Some(Ok(e)) => Ok(Some(e)),
-            Some(Err(e)) => Err(e.into()),
-            None => Ok(None),
+        let recv_queue = socket.recv_queue();
+        if recv_queue < 2 {
+            return Ok(None); // We don't have 2 bytes of length
         }
+
+        // Peek at the message length (keeping length and message in the
+        // rx-buffer if it is not completely received)
+        let mut buf_msg_length = [0u8; 2];
+        let bytes_peeked = socket.peek_slice(&mut buf_msg_length)?;
+        if bytes_peeked < 2 {
+            // smoltcp currently does not provide the capability to peek
+            // over the edge of the (internal) rx ringbuffer. the current
+            // peek cannot have this ability without copying data
+            // internally, peek_slice does however, at least based on its
+            // API design and comment. Unfortunately (likely due to a bug in
+            // smoltcp) it does not do so, which makes it impossible to read
+            // the length if we are at the end of the ringbuffer. This can
+            // be solved in one of the following ways:
+            // - Change peek_slice to do what the comment says: Do the same
+            //   as recv_slice, which does look over the ringbuffer boundry.
+            // - Add a `peek_offset(&mut self, size: usize, offset: usize)`
+            //   to smoltcp which allows us to do option 1 ourselves
+            // - Read and dequeue the message length, then store it
+            //   somewhere in the application.
+            // - Read and dequeue the message length, then immediately
+            //   follow with the message and panic if it is not complete,
+            //   yet. This would likely happen more often than panicing if
+            //   we are exactly at the ringbuffer border.
+            //
+            // Technical debt: Because this is likely a bug in smoltcp and
+            // option 3 would require a lot of changes we're panicking in
+            // this case for now (at least until we have this fixed in a
+            // separate branch on smoltcp or a fork).
+            //
+            // The probability that this happens is `1/rx_buffer.len()`,
+            // which is currently < 1/512.
+            panic!("Bug/Limitation in smoltcp");
+        }
+        let length: usize = u16::from_be_bytes(buf_msg_length).into();
+
+        // Make sure it is even possible to receive the message.
+        if (2 + length) > socket.recv_capacity() {
+            // To handle messages larger than the rx_buffer size requires one of
+            // the following:
+            // - Partial protobuf decoding and storing the partial data
+            //   somewhere. Difficult if not impossible with the Protobuf
+            //   library (although it should in theory be possible)
+            // - Copying the data into a separate buffer that can hold it over
+            //   multiple poll calls. Difficult to do, especially since that
+            //   would require a heap large enough to store the data which could
+            //   be up to 64KiB of space, which would be near impossible on a
+            //   device with just low ram.
+            // - Keep a counter of the remaining message size and discard a
+            //   message over multiple calls to `try_recv` (with calls to
+            //   `iface.poll` in between). This would allow keeping the
+            //   connection open even if someone sends a too big message. The
+            //   problem with this approach is that it may break some
+            //   assumptions on the other side.
+            // - Panic or return an error, thus effectively dropping the
+            //   connection as there is no way to handle such big messages. This
+            //   is the option implemented below.
+            //
+            // Note that such messages won't happen under normal protocol
+            // completion as long as the rx_buffer is large enough to hold the
+            // largest possible message type (512 is sufficient for channels
+            // with 2 participants and 1 asset).
+            return Err(Error::MessageLargerThanRxBuffer(2 + length));
+        }
+
+        // Only continue if the message is complete.
+        if socket.recv_queue() < 2 + length {
+            return Ok(None); // We don't have all the data
+        }
+
+        // Read the entire message and decode it.
+        //
+        // Technical debt: We're currently creating a copy of the bytes in
+        // memory for decoding. It should be possible to do this without
+        // creating a copy (in a local variable) by implementing a custom buffer
+        // to decode from. This would also eliminate the need for the
+        // MAX_MESSAGE_SIZE local array.
+        //
+        // unsized local variables are currently unstable rust, see
+        // https://doc.rust-lang.org/unstable-book/language-features/unsized-locals.html.
+        // Therefore we need to specify a size. We cannot take it from socket or
+        // self.config because neither is constant => MAX_MESSAGE_SIZE
+        //
+        // Discard 2 bytes of length information.
+        let read = socket.recv(|x| {
+            let len = x.len().min(2);
+            (len, len)
+        })?;
+        if read != 2 {
+            // At the moment this cannot happen because we're panicking earlier
+            // if we are at the bingbuffer boundry (the only situation where
+            // this could happen). I've nevertheless added the logic to handle
+            // this case as a defensive mechanism (i.e. we won't panic here) in
+            // case someone fixes the panic above but doesn't change this part.
+            socket.recv(|_| (2 - read, ()))?;
+        }
+        let mut buf = [0u8; MAX_MESSAGE_SIZE];
+        let bytes_read = socket.recv_slice(&mut buf[..length])?;
+        if bytes_read != length {
+            // This can only happen if the rx_buffer runs out, which can't
+            // happen because we have queued bytes. Note that this only holds
+            // true as long as smoltcp does not queue out-of-order packets.
+            unreachable!("We previously checked for queue size, did smoltcp add storage for out-of-order packets?")
+        }
+        let env = T::decode(&buf[..length])?;
+        Ok(Some(env))
     }
 
     fn wait_handshake_and_propose_channel(
@@ -331,7 +425,7 @@ where
         withdraw_receiver: Address,
     ) -> Result<(), Error> {
         // Channel Proposal
-        let init_balance = Balances([ParticipantBalances([100.into(), 100.into()])]);
+        let init_balance = Balances([ParticipantBalances([100_000.into(), 100_000.into()])]);
         let peers = self
             .config
             .participants
@@ -453,7 +547,9 @@ where
         // may be problematic, as that could (in theory) result in the need for
         // larger tx buffers.
         match participant_msg {
-            Some(msg) => channel.process_participant_msg(msg)?,
+            Some(msg) => {
+                channel.process_participant_msg(msg)?;
+            }
             None => {}
         }
         match service_msg {
@@ -461,6 +557,7 @@ where
             Some(ServiceReplyMessage::Watcher(msg)) => channel.process_watcher_reply(msg)?,
             None => {}
         }
+
         Ok(())
     }
 
