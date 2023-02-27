@@ -47,11 +47,11 @@ pub struct Config {
 
 /// State machine for the demo logic: Fetch information about the blockchain
 /// from the go-side, create TCP socket with participant and propose channel.
-pub struct Application<'cl: 'ch, 'ch, DeviceT>
+pub struct Application<'cl, DeviceT>
 where
     DeviceT: for<'d> Device<'d>,
 {
-    state: ApplicationState<'cl, 'ch, DeviceT>,
+    state: ApplicationState<'cl, DeviceT>,
     iface: &'cl RefCell<Interface<'cl, DeviceT>>,
     participant_handle: SocketHandle,
     service_handle: SocketHandle,
@@ -62,7 +62,7 @@ where
 }
 
 /// Enum to represent the states the Application can be in.
-enum ApplicationState<'cl: 'ch, 'ch, DeviceT>
+enum ApplicationState<'cl, DeviceT>
 where
     DeviceT: for<'d> Device<'d>,
 {
@@ -81,7 +81,7 @@ where
         withdraw_receiver: Address,
     },
     Active {
-        channel: Channel<'cl, 'ch, ProtoBufEncodingLayer<Bus<'cl, DeviceT>>>,
+        channel: Channel<'cl, ProtoBufEncodingLayer<Bus<'cl, DeviceT>>>,
     },
 }
 
@@ -93,6 +93,7 @@ pub enum Error {
     UnexpectedMsg,
     ConversionError(ConversionError),
     ChannelError(channel::Error),
+    ChannelNotActive,
 }
 
 impl From<smoltcp::Error> for Error {
@@ -126,7 +127,7 @@ enum ServiceReplyMessage {
     Funder(FunderReplyMessage),
 }
 
-impl<'cl: 'ch, 'ch, DeviceT> Application<'cl, 'ch, DeviceT>
+impl<'cl, DeviceT> Application<'cl, DeviceT>
 where
     DeviceT: for<'d> Device<'d>,
 {
@@ -486,6 +487,16 @@ where
                 withdraw_receiver,
             } => self.wait_handshake_and_propose_channel(eth_holder, withdraw_receiver),
             ApplicationState::Active { .. } => self.forward_messages_to_channel(),
+        }
+    }
+
+    pub fn update(&mut self) -> Result<(), Error> {
+        match &mut self.state {
+            ApplicationState::Active { channel } => {
+                channel.update(100.into(), false)?;
+                Ok(())
+            }
+            _ => Err(Error::ChannelNotActive),
         }
     }
 

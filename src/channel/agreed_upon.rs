@@ -2,7 +2,7 @@ use super::{
     fixed_size_payment::{self},
     signed::SignedChannel,
     withdrawal_auth::make_signed_withdrawal_auths,
-    PartIdx, Peers,
+    InvalidChannel, PartIdx, Peers,
 };
 use crate::{
     abiencode::{
@@ -52,6 +52,14 @@ impl From<abiencode::Error> for AddSignatureError {
 impl From<sig::Error> for AddSignatureError {
     fn from(e: sig::Error) -> Self {
         Self::RecoveryFailed(e)
+    }
+}
+impl From<InvalidChannel> for AddSignatureError {
+    fn from(e: InvalidChannel) -> Self {
+        match e {
+            InvalidChannel::WrongVersion => Self::InvalidVersionNumber,
+            InvalidChannel::WrongChannelId => Self::InvalidChannelID,
+        }
     }
 }
 

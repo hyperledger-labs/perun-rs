@@ -104,6 +104,9 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     pub fn channel_id(&self) -> Hash {
         self.state.channel_id()
     }
+    pub fn version(&self) -> u64 {
+        self.state.version()
+    }
 
     pub fn state(&self) -> State {
         self.state
@@ -144,10 +147,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         }
     }
 
-    pub fn update<'ch>(
-        &'ch mut self,
-        new_state: State,
-    ) -> Result<ChannelUpdate<'cl, 'ch, B>, ProposeUpdateError> {
+    pub fn update(&self, new_state: State) -> Result<ChannelUpdate, ProposeUpdateError> {
         self.check_valid_transition(new_state)?;
 
         // Sign immediately, we need the signature to send the proposal.
@@ -166,10 +166,10 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         Ok(ChannelUpdate::new(self, new_state, self.part_idx, sig))
     }
 
-    pub fn handle_update<'ch>(
-        &'ch mut self,
+    pub fn handle_update(
+        &self,
         msg: LedgerChannelUpdate,
-    ) -> Result<ChannelUpdate<'cl, 'ch, B>, HandleUpdateError> {
+    ) -> Result<ChannelUpdate, HandleUpdateError> {
         self.check_valid_transition(msg.state)?;
 
         let hash = abiencode::to_hash(&msg.state)?;
@@ -248,9 +248,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     }
 
     // Use `update()` if the state has to change, too
-    pub fn close_normal<'ch>(
-        &'ch mut self,
-    ) -> Result<ChannelUpdate<'cl, 'ch, B>, ProposeUpdateError> {
+    pub fn close_normal(&self) -> Result<ChannelUpdate, ProposeUpdateError> {
         let mut new_state = self.state.make_next_state();
         new_state.is_final = true;
         self.update(new_state)

@@ -13,8 +13,8 @@ use perun::{
     wire::MessageBus,
 };
 
-pub struct Channel<'cl, 'ch, B: MessageBus> {
-    inner: ChannelInner<'cl, 'ch, B>,
+pub struct Channel<'cl, B: MessageBus> {
+    inner: ChannelInner<'cl, B>,
 }
 
 /// Because we're storing both ActiveChannel and ChannelUpdate in this enum it
@@ -25,13 +25,13 @@ pub struct Channel<'cl, 'ch, B: MessageBus> {
 /// would break if we try to move it, since that reference is not
 /// (self)-relative within `ChannelInner` (which is not easily possible in Rust
 /// if at all). All references are fixed addresses and thus break on a memcopy.
-enum ChannelInner<'cl, 'ch, B: MessageBus> {
+enum ChannelInner<'cl, B: MessageBus> {
     Proposed(channel::ProposedChannel<'cl, B>),
     AgreedUpon(channel::AgreedUponChannel<'cl, B>),
     Signed(channel::SignedChannel<'cl, B>, bool, bool),
     Active(
         channel::ActiveChannel<'cl, B>,
-        Option<channel::ChannelUpdate<'cl, 'ch, B>>,
+        Option<channel::ChannelUpdate>,
     ),
     // We store owned values in this enum and need to move the channel out of
     // the previous enum to be able to transition to the next state. While we
@@ -112,7 +112,7 @@ impl From<channel::ApplyError> for Error {
     }
 }
 
-impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
+impl<'cl, B: MessageBus> Channel<'cl, B> {
     pub fn new(channel: ProposedChannel<'cl, B>) -> Self {
         Self {
             inner: ChannelInner::Proposed(channel),
@@ -129,8 +129,8 @@ impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
     fn progress<F>(&mut self, f: F) -> Result<(), Error>
     where
         F: FnOnce(
-            ChannelInner<'cl, 'ch, B>,
-        ) -> Result<ChannelInner<'cl, 'ch, B>, (ChannelInner<'cl, 'ch, B>, Error)>,
+            ChannelInner<'cl, B>,
+        ) -> Result<ChannelInner<'cl, B>, (ChannelInner<'cl, B>, Error)>,
     {
         // Move ChannelInner out of self so we get ownership of the variant.
         let mut inner = ChannelInner::TemporaryInvalidState;
@@ -156,7 +156,7 @@ impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
         }
     }
 
-    pub fn update(&'ch mut self, amount: U256, is_final: bool) -> Result<(), Error> {
+    pub fn update(&mut self, amount: U256, is_final: bool) -> Result<(), Error> {
         // Trying to use self.progress here was a pain due the nature of how we
         // currently store the pending update. self.inner can neither be moved
         // nor copied while a pending update exists, since it is currently
@@ -318,27 +318,27 @@ impl<'cl, 'ch, B: MessageBus> Channel<'cl, 'ch, B> {
                     Ok(v) => v,
                     Err(e) => return Err((ChannelInner::Active(ch, None), e.into())),
                 };
-                match update.accept() {
+                match update.accept(&mut ch) {
                     Ok(_) => {}
                     Err(e) => return Err((ChannelInner::Active(ch, None), e.into())),
                 }
-                match update.apply() {
+                match update.apply(&mut ch) {
                     Ok(_) => {}
-                    Err((_, e)) => return Err((ChannelInner::Active(ch, None), e.into())),
+                    Err(e) => return Err((ChannelInner::Active(ch, None), e.into())),
                 }
                 Ok(ChannelInner::Active(ch, None))
             }
             (
-                ChannelInner::Active(ch, Some(mut update)),
+                ChannelInner::Active(mut ch, Some(mut update)),
                 ParticipantMessage::ChannelUpdateAccepted(msg),
             ) => {
-                match update.participant_accepted(1, msg) {
+                match update.participant_accepted(&ch, 1, msg) {
                     Ok(_) => {}
                     Err(e) => return Err((ChannelInner::Active(ch, Some(update)), e.into())),
                 }
-                match update.apply() {
+                match update.apply(&mut ch) {
                     Ok(_) => Ok(ChannelInner::Active(ch, None)),
-                    Err((u, e)) => Err((ChannelInner::Active(ch, Some(u)), e.into())),
+                    Err(e) => Err((ChannelInner::Active(ch, Some(update)), e.into())),
                 }
             }
             (

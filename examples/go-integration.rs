@@ -4,6 +4,7 @@
 
 use core::cell::RefCell;
 use core::option::Option::{None, Some};
+use perun::channel::ActiveChannel;
 use perun::{
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
@@ -498,7 +499,7 @@ fn main() {
     new_state.outcome.balances.0[0].0[0] += 10.into();
     new_state.outcome.balances.0[0].0[1] -= 10.into();
     let update = channel.update(new_state).unwrap();
-    handle_update_response(&bus, update);
+    handle_update_response(&bus, &mut channel, update);
 
     if NORMAL_CLOSE {
         print_user_interaction!("Alice: Propose Normal close");
@@ -506,7 +507,7 @@ fn main() {
         // Propose a normal closure
         new_state.is_final = true;
         let update = channel.update(new_state).unwrap();
-        handle_update_response(&bus, update);
+        handle_update_response(&bus, &mut channel, update);
     }
 
     if SEND_DISPUTE {
@@ -518,16 +519,17 @@ fn main() {
     print_bold!("Alice done");
 }
 
-fn handle_update_response<'cl, 'ch, B: MessageBus>(
+fn handle_update_response(
     bus: &Bus,
-    mut update: ChannelUpdate<'cl, 'ch, B>,
+    channel: &mut ActiveChannel<impl MessageBus>,
+    mut update: ChannelUpdate,
 ) {
     match bus.recv_envelope().msg {
         Some(envelope::Msg::ChannelUpdateAccMsg(msg)) => {
             update
-                .participant_accepted(1, msg.try_into().unwrap())
+                .participant_accepted(channel, 1, msg.try_into().unwrap())
                 .unwrap();
-            update.apply().unwrap();
+            update.apply(channel).unwrap();
         }
         Some(envelope::Msg::ChannelUpdateRejMsg(_)) => {
             print_bold!("Aborting update");
