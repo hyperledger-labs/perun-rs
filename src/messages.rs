@@ -24,7 +24,7 @@ pub enum ConversionError {
 #[derive(Debug)]
 pub enum WatcherRequestMessage {
     /// Ask the Watcher to start watching the blockchain for disputes.
-    /// Acknowledged with [WatcherMessage::Ack] containing `version == 0`.
+    /// Acknowledged with [WatcherReplyMessage::Ack] containing `version == 0`.
     WatchRequest(WatchInfo),
     /// Ask the Watcher to initialize a dispute on-chain, with the given state.
     /// It currently does not contain the parameters for reducing the amount of
