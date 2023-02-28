@@ -34,9 +34,6 @@ cargo build --target thumbv7em-none-eabi --no-default-features -F k256
 # - currently requires the nightly compiler (due to the chosen allocator)
 # - `--release` is needed to reduce the binary size so it fits into FLASH
 cargo +nightly run --example go-integration --target thumbv7m-none-eabi --no-default-features -F nostd-example --release
-
-# Compile cortex-m-demo and flash to hardware (currently does nothing)
-cargo +nightly flash --chip STM32F439ZITx --target thumbv7em-none-eabihf --release -p cortex-m-demo
 ```
 
 ### Run (new) demo on real hardware

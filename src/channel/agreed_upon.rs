@@ -41,8 +41,13 @@ pub enum AddSignatureError {
     RecoveryFailed(sig::Error),
     AlreadySigned,
     InvalidSignature(Address),
+    // Used to indicate that the incomming message does not match the update.
     InvalidChannelID,
     InvalidVersionNumber,
+    // Used to indicate the wrong channel was passed (i.e. a bug in the
+    // application code).
+    WrongVersion,
+    WrongChannelId,
 }
 impl From<abiencode::Error> for AddSignatureError {
     fn from(e: abiencode::Error) -> Self {
@@ -57,8 +62,8 @@ impl From<sig::Error> for AddSignatureError {
 impl From<InvalidChannel> for AddSignatureError {
     fn from(e: InvalidChannel) -> Self {
         match e {
-            InvalidChannel::WrongVersion => Self::InvalidVersionNumber,
-            InvalidChannel::WrongChannelId => Self::InvalidChannelID,
+            InvalidChannel::WrongVersion => Self::WrongVersion,
+            InvalidChannel::WrongChannelId => Self::WrongChannelId,
         }
     }
 }

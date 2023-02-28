@@ -29,7 +29,10 @@ where
         // async afaict.
         let count_written = socket.send_slice(msg).unwrap();
         if count_written != msg.len() {
-            panic!("Could not send message wrote {count_written}/{}", msg.len());
+            panic!(
+                "Could not send message, wrote {count_written}/{} bytes",
+                msg.len()
+            );
         }
     }
 }

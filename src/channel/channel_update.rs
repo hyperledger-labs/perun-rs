@@ -18,10 +18,20 @@ type State = fixed_size_payment::State<ASSETS, PARTICIPANTS>;
 pub enum AcceptError {
     AbiEncodeError(abiencode::Error),
     AlreadyAccepted,
+    WrongVersion,
+    WrongChannelId,
 }
 impl From<abiencode::Error> for AcceptError {
     fn from(e: abiencode::Error) -> Self {
         Self::AbiEncodeError(e)
+    }
+}
+impl From<InvalidChannel> for AcceptError {
+    fn from(e: InvalidChannel) -> Self {
+        match e {
+            InvalidChannel::WrongVersion => Self::WrongVersion,
+            InvalidChannel::WrongChannelId => Self::WrongChannelId,
+        }
     }
 }
 
@@ -98,6 +108,8 @@ impl ChannelUpdate {
         &mut self,
         channel: &mut ActiveChannel<impl MessageBus>,
     ) -> Result<(), AcceptError> {
+        self.ensure_valid_channel(channel)?;
+
         match self.signatures[channel.part_idx()] {
             Some(_) => Err(AcceptError::AlreadyAccepted),
             None => {
@@ -120,7 +132,13 @@ impl ChannelUpdate {
         }
     }
 
-    pub fn reject(self, channel: &mut ActiveChannel<impl MessageBus>, reason: &str) {
+    pub fn reject(
+        self,
+        channel: &mut ActiveChannel<impl MessageBus>,
+        reason: &str,
+    ) -> Result<(), InvalidChannel> {
+        self.ensure_valid_channel(channel)?;
+
         channel.client().bus.broadcast_to_participants(
             channel.part_idx(),
             channel.peers(),
@@ -130,6 +148,7 @@ impl ChannelUpdate {
                 reason: reason.to_string(),
             },
         );
+        Ok(())
     }
 
     pub fn participant_accepted(
@@ -139,6 +158,13 @@ impl ChannelUpdate {
         msg: LedgerChannelUpdateAccepted,
     ) -> Result<(), AddSignatureError> {
         self.ensure_valid_channel(channel)?;
+
+        if msg.channel != self.channel_id {
+            return Err(AddSignatureError::InvalidChannelID);
+        }
+        if msg.version != self.new_state.version() {
+            return Err(AddSignatureError::InvalidVersionNumber);
+        }
 
         let hash = abiencode::to_hash(&self.new_state)?;
         let signer = channel.client().signer.recover_signer(hash, msg.sig)?;
@@ -183,6 +209,7 @@ impl ChannelUpdate {
         channel: &mut ActiveChannel<impl MessageBus>,
     ) -> Result<(), ApplyError> {
         self.ensure_valid_channel(channel)?;
+
         channel.force_update(self.new_state, self.signatures()?)?;
         Ok(())
     }

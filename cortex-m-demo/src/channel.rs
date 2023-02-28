@@ -17,14 +17,6 @@ pub struct Channel<'cl, B: MessageBus> {
     inner: ChannelInner<'cl, B>,
 }
 
-/// Because we're storing both ActiveChannel and ChannelUpdate in this enum it
-/// does not have `Copy` and it can only be moved if the variant is not `Active`
-/// or the `update` Option is `None`.
-///
-/// Reason: ChannelUpdate contains a reference to the `ActiveChannel`, which
-/// would break if we try to move it, since that reference is not
-/// (self)-relative within `ChannelInner` (which is not easily possible in Rust
-/// if at all). All references are fixed addresses and thus break on a memcopy.
 enum ChannelInner<'cl, B: MessageBus> {
     Proposed(channel::ProposedChannel<'cl, B>),
     AgreedUpon(channel::AgreedUponChannel<'cl, B>),
@@ -42,7 +34,7 @@ enum ChannelInner<'cl, B: MessageBus> {
     // during the transition itself. It is only reachable when using reentrancy
     // or some other multi-threaded shenanigans. It might be reachable if the
     // transition panics for some reason instead of returning an Error. This
-    // state should be unreachable.
+    // state should be unreachable while not calling a method on the Channel.
     //
     // I hate having to do this but I couldn't find a good way to do it without
     // lifting the no-duplication invariant or using unsafe blocks, which could
@@ -159,10 +151,10 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
     }
 
     pub fn update(&mut self, amount: U256, is_final: bool) -> Result<(), Error> {
-        // Trying to use self.progress here was a pain due the nature of how we
-        // currently store the pending update. self.inner can neither be moved
-        // nor copied while a pending update exists, since it is currently
-        // self-referential. Thus the same applies to Self, too.
+        // This function does not use self.progress because it was written at a
+        // time where using it was a pain, given the reference to ch inside of
+        // update. This can probably be implemented in a cleaner way using
+        // self.progress by now.
         match self.inner {
             ChannelInner::Active(ref mut ch, ref mut update) => {
                 let mut new_state = ch.state().make_next_state();
@@ -187,13 +179,10 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
 
     pub fn force_close(&mut self) -> Result<(), Error> {
         self.progress(|inner| match inner {
-            ChannelInner::Active(ch, update) => {
-                // TODO: Make sure this works even if update is not None
-                match ch.force_close() {
-                    Ok(_) => Ok(ChannelInner::ForceClosed),
-                    Err((ch, e)) => Err((ChannelInner::Active(ch, update), e.into())),
-                }
-            }
+            ChannelInner::Active(ch, update) => match ch.force_close() {
+                Ok(_) => Ok(ChannelInner::ForceClosed),
+                Err((ch, e)) => Err((ChannelInner::Active(ch, update), e.into())),
+            },
             ChannelInner::TemporaryInvalidState => unreachable!(),
             inner => return Err((inner, Error::InvalidState)),
         })
@@ -211,8 +200,9 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
             // We're currently not processing acknowledge messages, as there is
             // currently no mechanism to auto-reject updates if there is no
             // recent acknowledged state. Nor is there an automatic
-            // re-transmission in case of network connection closure, so there
-            // is currently no need to do anything with the acknowledgement.
+            // re-transmission in case of network connection closure (as that is
+            // already handled by TCP), so there is currently no need to do
+            // anything with the acknowledgement.
             (inner @ ChannelInner::Active(_, _), WatcherReplyMessage::Ack { .. }) => Ok(inner),
             (inner @ ChannelInner::Active(_, _), WatcherReplyMessage::DisputeAck { .. }) => {
                 Ok(inner)
@@ -268,7 +258,6 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
 
             // AgreedUponChannel
             (ChannelInner::AgreedUpon(mut ch), ParticipantMessage::ChannelUpdateAccepted(msg)) => {
-                // ch.add_signature(msg).or_else(|e| Err((ChannelInner::AgreedUpon(ch), e.into())))?;
                 match ch.add_signature(msg) {
                     Ok(_) => {}
                     Err(e) => return Err((ChannelInner::AgreedUpon(ch), e.into())),
@@ -283,8 +272,10 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                 ParticipantMessage::ChannelUpdateRejected { reason, .. },
             ) => Err((inner, Error::Rejected { reason })),
 
-            // SignedChannel: (nothing is valid until we receive a response from Watcher/Funder, though production code probably
-            // will have to cache update requests.
+            // SignedChannel: (nothing is valid until we receive a response from
+            // Watcher/Funder, though production code probably will have to
+            // cache update requests instead or pause receiving/progressing
+            // participant messages.
 
             // ActiveChannel: Note that this will only accept incomming
             // ChannelUpdates if we have not proposed one ourselfes, which could
@@ -295,15 +286,14 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
             // wants. Since we are the application in this demo we're just
             // rejecting incomming updates.
             //
-            // Technical debt: At the moment we cannot use `ch.handle_update` to
-            // handle the incomming message if update != None, because the
-            // existing update contains a mutable reference to the channel
-            // (`ch`). This is also the reason why we're currently rejecting the
-            // incomming message with `InvalidMsg` on the client side instead of
-            // replying with a rejected message. We will have to think about how
-            // exactly we want to handle the situation of multiple updates. As
-            // mentioned before it is currently strictly forbidden to have
-            // multiple `ChannelUpdate` objects for the same channel.
+            // Technical debt: At the moment we don't use `ch.handle_update` to
+            // handle the incomming message if update != None. This is also the
+            // reason why we're currently rejecting the incomming message with
+            // `InvalidMsg` on the client side instead of replying with a
+            // rejected message. This channel abstraction does not work with
+            // multiple pending updates (a concept not used by/present in
+            // go-perun). We will have to think about how exactly we want
+            // to handle the situation of multiple updates.
             (ChannelInner::Active(mut ch, None), ParticipantMessage::ChannelUpdate(msg)) => {
                 // Technical debt: We always return update=None because the
                 // update is entirely handled within this block. The `update` in

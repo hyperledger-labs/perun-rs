@@ -36,6 +36,9 @@ use crate::{
     channel::{self, Channel},
 };
 
+/// We are currently copying from the rx-buffer to a slice for decoding
+/// protobuf, because that needs a single consecutive area of memory (see
+/// comments in [`try_recv`] for details).
 pub const MAX_MESSAGE_SIZE: usize = 510;
 
 /// Configuration for the demo: Peers and where to find the
@@ -178,6 +181,11 @@ where
             // wrong with the socket (unexpected tcp state). Returns None if not
             // enough bytes are available (we only received partial data for
             // some reason).
+            //
+            // Note that this will fail if we are at a ringbuffer boundry, see
+            // `try_recv` for details. In this demo this is not a problem
+            // because the rx_buffer is always empty when this function is
+            // called and can thus always fit 40 bytes in a consecutive slice.
             if let Some((eth_holder, withdraw_receiver)) = socket.recv(|x| {
                 if x.len() >= 40 {
                     let eth_holder = Address(x[..20].try_into().unwrap());
@@ -561,12 +569,8 @@ where
         Ok(())
     }
 
-    // echo service to test sending and receiving of data. This echo service
-    // will break if the other side does not read from the socket in time.
-    // Since this is only intended for testing it should be fine. If it
-    // would be a problem we could query the amount of available rx and tx
-    // buffer space and only read then write that amount to not panic at one
-    // of the unwraps below.
+    /// Main polling function transitioning between states. Call this regularly,
+    /// for example always after polling the network interface.
     pub fn poll(&mut self) -> Result<(), Error> {
         match self.state {
             ApplicationState::InitialState => self.connect_config_dealer(),
@@ -587,6 +591,8 @@ where
         }
     }
 
+    /// Send 100 WEI to the other channel participant to demonstrate channel
+    /// updates. If the channel is not currently active it will return an error.
     pub fn update(&mut self) -> Result<(), Error> {
         match &mut self.state {
             ApplicationState::Active { channel } => {
