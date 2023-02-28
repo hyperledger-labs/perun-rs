@@ -42,7 +42,8 @@ enum ChannelInner<'cl, B: MessageBus> {
     // behavior in the above panic case.
     TemporaryInvalidState,
 
-    ForceClosed,
+    ForceClosing,
+    Closed,
 }
 
 #[derive(Debug)]
@@ -59,6 +60,7 @@ pub enum Error {
     Accept(channel::AcceptError),
     ApplyUpdate(channel::ApplyError),
     NotEnoughFunds,
+    Closed,
 }
 impl From<channel::HandleAcceptError> for Error {
     fn from(e: channel::HandleAcceptError) -> Self {
@@ -180,7 +182,7 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
     pub fn force_close(&mut self) -> Result<(), Error> {
         self.progress(|inner| match inner {
             ChannelInner::Active(ch, update) => match ch.force_close() {
-                Ok(_) => Ok(ChannelInner::ForceClosed),
+                Ok(_) => Ok(ChannelInner::ForceClosing),
                 Err((ch, e)) => Err((ChannelInner::Active(ch, update), e.into())),
             },
             ChannelInner::TemporaryInvalidState => unreachable!(),
@@ -204,12 +206,13 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
             // already handled by TCP), so there is currently no need to do
             // anything with the acknowledgement.
             (inner @ ChannelInner::Active(_, _), WatcherReplyMessage::Ack { .. }) => Ok(inner),
-            (inner @ ChannelInner::Active(_, _), WatcherReplyMessage::DisputeAck { .. }) => {
-                Ok(inner)
-            }
             (ChannelInner::Active(_, _), WatcherReplyMessage::DisputeNotification { .. }) => {
-                Ok(ChannelInner::ForceClosed)
+                Ok(ChannelInner::Closed)
             }
+            (ChannelInner::ForceClosing, WatcherReplyMessage::DisputeAck { .. }) => {
+                Ok(ChannelInner::Closed)
+            }
+            (inner @ ChannelInner::ForceClosing, _) => Err((inner, Error::Closed)),
             (ChannelInner::TemporaryInvalidState, _) => unreachable!(),
             (inner, _) => Err((inner, Error::InvalidState)),
         })
@@ -224,6 +227,8 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                     Ok(ChannelInner::Signed(ch, watching, true))
                 }
             }
+            (inner @ ChannelInner::ForceClosing, _) => Err((inner, Error::Closed)),
+            (inner @ ChannelInner::Closed, _) => Err((inner, Error::Closed)),
             (ChannelInner::TemporaryInvalidState, _) => unreachable!(),
             (inner, _) => Err((inner, Error::InvalidState)),
         })
@@ -340,6 +345,8 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                 ChannelInner::Active(ch, Some(_)),
                 ParticipantMessage::ChannelUpdateRejected { .. },
             ) => Ok(ChannelInner::Active(ch, None)),
+            (inner @ ChannelInner::ForceClosing, _) => Err((inner, Error::Closed)),
+            (inner @ ChannelInner::Closed, _) => Err((inner, Error::Closed)),
             (ChannelInner::TemporaryInvalidState, _) => unreachable!(),
             (inner, _) => Err((inner, Error::InvalidState)),
         })

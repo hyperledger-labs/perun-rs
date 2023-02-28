@@ -61,16 +61,6 @@ impl DebouncedButton {
         self.last_state
     }
 
-    /// Returns true if the pin is high (ignoring bounces)
-    pub fn is_high(&mut self, time: u64) -> bool {
-        self.debounced_state(time) == State::High
-    }
-
-    /// Returns true if the pin is low (ignoring bounces)
-    pub fn is_low(&mut self, time: u64) -> bool {
-        self.debounced_state(time) == State::High
-    }
-
     /// Returns true if the pin goes from low to high (ignoring bounces)
     pub fn is_rising_edge(&mut self, time: u64) -> bool {
         let last_state = self.last_state;

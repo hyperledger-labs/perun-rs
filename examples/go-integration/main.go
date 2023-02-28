@@ -148,7 +148,7 @@ func main() {
 		funder_account.Address,
 		adjudicator_account,
 	)
-	perunID := simple.NewAddress("Bob")
+	perunID := simple.NewAddress("Alice")
 	bus := wirenet.NewBus(
 		simple.NewAccount(perunID),
 		simple.NewTCPDialer(time.Minute),

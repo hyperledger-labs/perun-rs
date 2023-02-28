@@ -66,7 +66,7 @@ fn entry() -> ! {
     loop {}
 }
 
-const PARTICIPANTS: [&'static str; 2] = ["Alice", "Bob"];
+const PARTICIPANTS: [&'static str; 2] = ["Bob", "Alice"];
 const NORMAL_CLOSE: bool = false;
 const SEND_DISPUTE: bool = true;
 
@@ -459,7 +459,7 @@ fn main() {
             .participant_accepted(1, msg.try_into().unwrap())
             .unwrap(),
         Some(envelope::Msg::ChannelProposalRejMsg(_)) => {
-            print_bold!("Alice done: Received ProposalRejected");
+            print_bold!("Bob done: Received ProposalRejected");
             return;
         }
         Some(_) => panic!("Unexpected message"),
@@ -477,14 +477,14 @@ fn main() {
             channel.add_signature(msg.try_into().unwrap()).unwrap()
         }
         Some(envelope::Msg::ChannelUpdateRejMsg(_)) => {
-            print_bold!("Alice done: Did not receive Signature from Bob");
+            print_bold!("Bob done: Did not receive Signature from Bob");
             return;
         }
         Some(_) => panic!("Unexpected message"),
         None => panic!("Envelope did not contain a msg"),
     }
 
-    print_bold!("Alice: Received all signatures, send to watcher/funder");
+    print_bold!("Bob: Received all signatures, send to watcher/funder");
 
     let channel = channel.build().unwrap();
     // Receive acknowledgements (currently not checked but we have to read them
@@ -494,7 +494,7 @@ fn main() {
 
     let mut channel = channel.mark_funded();
 
-    print_user_interaction!("Alice: Propose Update");
+    print_user_interaction!("Bob: Propose Update");
     let mut new_state = channel.state().make_next_state();
     new_state.outcome.balances.0[0].0[0] += 10.into();
     new_state.outcome.balances.0[0].0[1] -= 10.into();
@@ -502,7 +502,7 @@ fn main() {
     handle_update_response(&bus, &mut channel, update);
 
     if NORMAL_CLOSE {
-        print_user_interaction!("Alice: Propose Normal close");
+        print_user_interaction!("Bob: Propose Normal close");
         let mut new_state = channel.state().make_next_state();
         // Propose a normal closure
         new_state.is_final = true;
@@ -511,12 +511,12 @@ fn main() {
     }
 
     if SEND_DISPUTE {
-        print_user_interaction!("Alice: Send StartDispute Message (force-close)");
+        print_user_interaction!("Bob: Send StartDispute Message (force-close)");
         channel.force_close().unwrap();
         bus.recv_message();
     }
 
-    print_bold!("Alice done");
+    print_bold!("Bob done");
 }
 
 fn handle_update_response(

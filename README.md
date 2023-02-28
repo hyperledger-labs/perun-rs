@@ -102,6 +102,22 @@ load
 run
 ```
 
+## cortex-m-demo I/O
+- Green LED: Toggles after every (debounced) button press to indicate it was
+  registered
+- Blue LED: Toggles every Second to indicate that the application has not
+  crashed
+- Red LED: Toggles if the button press was invalid (for example because the
+  channel is already closed). The demo will continue to work normally if the red
+  LED roggles.
+- USER Button (Blue, B1): Send 100 WEI to the other participant
+- PA0 (D32), located in CN10, marked as "TIMER", the 3rd pin from the bottom
+  (side with the buttons) on the inner side: Send a normal channel closure
+  (is_final=true) by connecting it to any GND pin.
+- PE0 (D34), located in CN10, marked as "TIMER", the 1st pin from the bottom
+  (side with the buttons) on the inner side: Send a force close (dispute
+  request) by connecting it to any GND pin.
+
 ## Feature Flags
 - `std` (default)
 - `k256` (default) Use [`k256`](https://crates.io/crates/k256) for signatures

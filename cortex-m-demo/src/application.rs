@@ -9,6 +9,7 @@ use core::cell::RefCell;
 
 use alloc::vec::Vec;
 use perun::{
+    abiencode::types::U256,
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
         Asset,
@@ -88,6 +89,7 @@ where
     Active {
         channel: Channel<'cl, ProtoBufEncodingLayer<Bus<'cl, DeviceT>>>,
     },
+    Closed,
 }
 
 #[derive(Debug)]
@@ -587,16 +589,34 @@ where
                 eth_holder,
                 withdraw_receiver,
             } => self.wait_handshake_and_propose_channel(eth_holder, withdraw_receiver),
-            ApplicationState::Active { .. } => self.forward_messages_to_channel(),
+            ApplicationState::Active { .. } => match self.forward_messages_to_channel() {
+                Err(Error::ChannelError(channel::Error::Closed)) => {
+                    self.state = ApplicationState::Closed;
+                    Ok(())
+                }
+                v => v,
+            },
+            ApplicationState::Closed => Ok(()),
         }
     }
 
     /// Send 100 WEI to the other channel participant to demonstrate channel
     /// updates. If the channel is not currently active it will return an error.
-    pub fn update(&mut self) -> Result<(), Error> {
+    pub fn update(&mut self, amount: U256, is_final: bool) -> Result<(), Error> {
         match &mut self.state {
             ApplicationState::Active { channel } => {
-                channel.update(100.into(), false)?;
+                channel.update(amount, is_final)?;
+                Ok(())
+            }
+            _ => Err(Error::ChannelNotActive),
+        }
+    }
+
+    // Force close the channel by sending a DisputeRequest to the Watcher.
+    pub fn force_close(&mut self) -> Result<(), Error> {
+        match &mut self.state {
+            ApplicationState::Active { channel } => {
+                channel.force_close()?;
                 Ok(())
             }
             _ => Err(Error::ChannelNotActive),

@@ -92,6 +92,7 @@ fn main() {
     let gpiob = peripherals.GPIOB.split();
     let gpioc = peripherals.GPIOC.split();
     let gpiog = peripherals.GPIOG.split();
+    let gpioe = peripherals.GPIOE.split();
 
     // LEDs
     let mut green_led: LedOutputPin<0> = gpiob.pb0.into_output_pin(PinState::Low).unwrap();
@@ -103,6 +104,10 @@ fn main() {
         gpioc.pc13.into_pull_down_input().erase(),
         DEBOUNCE_THRESHHOLD,
     );
+    let mut normal_close_btn =
+        DebouncedButton::new(gpioa.pa0.into_pull_up_input().erase(), DEBOUNCE_THRESHHOLD);
+    let mut force_close_btn =
+        DebouncedButton::new(gpioe.pe0.into_pull_up_input().erase(), DEBOUNCE_THRESHHOLD);
 
     // Ethernet (PHY)
     let eth_pins = EthPins {
@@ -181,11 +186,17 @@ fn main() {
 
     blue_led.set_high(); // Setup finished
 
+    // If we reset the device it will open a new TCP connection to the go-perun
+    // participant and propose a channel. If our wire address is smaller
+    // (alphabetically) than that of the go-side, the go-side will drop the
+    // connection under some circumstances and will not reply to our channel
+    // proposal. To prevent this from happening in this demo we use the larger
+    // wire address. See https://github.com/hyperledger-labs/go-perun/issues/386
     let config = Config {
         config_server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_CONFIG_PORT),
         other_participant: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_PARTICIPANT_PORT),
         service_server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_SERVICE_PORT),
-        participants: ["Alice", "Bob"],
+        participants: ["Bob", "Alice"],
     };
 
     // Move the interface into a RefCell because we need a mutable reference in
@@ -223,7 +234,6 @@ fn main() {
 
     // main application loop
     let mut last_toggle_time = 0;
-    let mut stop = false;
     loop {
         // Get the current time
         let time: u64 = cortex_m::interrupt::free(|cs| *TIME.borrow(cs).borrow());
@@ -234,19 +244,27 @@ fn main() {
             Err(_) => {}
         }
 
-        if !stop {
-            match app.poll() {
-                Ok(_) => {}
-                Err(_) => {
-                    red_led.set_high();
-                    stop = true;
-                }
+        // Application state machine
+        app.poll().unwrap();
+
+        // Handle input buttons
+        if update_btn.is_rising_edge(time) {
+            match app.update(100.into(), false) {
+                Ok(_) => green_led.toggle(),
+                Err(_) => red_led.toggle(),
             }
         }
-
-        if update_btn.is_rising_edge(time) {
-            app.update().unwrap();
-            green_led.toggle();
+        if normal_close_btn.is_falling_edge(time) {
+            match app.update(0.into(), true) {
+                Ok(_) => green_led.toggle(),
+                Err(_) => red_led.toggle(),
+            }
+        }
+        if force_close_btn.is_falling_edge(time) {
+            match app.force_close() {
+                Ok(_) => green_led.toggle(),
+                Err(_) => red_led.toggle(),
+            }
         }
 
         // Toggle the blue LED every second
