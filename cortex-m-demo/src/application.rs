@@ -72,24 +72,39 @@ enum ApplicationState<'cl, DeviceT>
 where
     DeviceT: for<'d> Device<'d>,
 {
+    /// Initial state, nothing has been done yet, the application was just
+    /// started. Immediately transition to `ConnectingToConfigDealer`
     InitialState,
+    /// Setting up the TCP connection to get info about the blockchain this demo
+    /// is using (eth-holder and withdraw_receiver). As soon as the connection is
+    /// established we read from it and go to `Configured`.
     ConnectingToConfigDealer,
+    /// We have everything we need, wait and do nothing until someone presses a
+    /// button or we receive a channel proposal (not yet implemented).
     Configured {
         eth_holder: Address,
         withdraw_receiver: Address,
     },
+    /// Setting up the TCP connections to other participant (p2p) and remote
+    /// funder/watcher. Once the connections are both established send the
+    /// handshake message and transition to `Handshake`.
     Connecting {
         eth_holder: Address,
         withdraw_receiver: Address,
     },
+    /// Wait until we receive the handshake response, then propose a channel and
+    /// transition to `Active`.
     Handshake {
         eth_holder: Address,
         withdraw_receiver: Address,
     },
+    /// We have an open channel, the logic of which is handled in a separate
+    /// state machine. If the channel closes transition to `Configured`.
     Active {
+        eth_holder: Address,
+        withdraw_receiver: Address,
         channel: Channel<'cl, ProtoBufEncodingLayer<Bus<'cl, DeviceT>>>,
     },
-    Closed,
 }
 
 #[derive(Debug)]
@@ -101,8 +116,9 @@ pub enum Error {
     UnexpectedMsg,
     ConversionError(ConversionError),
     ChannelError(channel::Error),
-    ChannelNotActive,
+    InvalidState,
     MessageLargerThanRxBuffer(usize),
+    SocketStillInUse,
 }
 
 impl From<smoltcp::Error> for Error {
@@ -212,18 +228,28 @@ where
     // same time.
     fn connect(&mut self, eth_holder: Address, withdraw_receiver: Address) -> Result<(), Error> {
         let mut iface = self.iface.borrow_mut();
-        let (psocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.participant_handle);
+        // Only continue if the sockets are free (i.e. closed) and avaliable.
+        // Alternatively we could use `socket.abort()`, resulting in a
+        // non-graceful shutdown but slightly faster transition times. One
+        // downside of doing it this way is that a malicious config dealer could
+        // DoS us by never sending a Fin, but since the config dealer is only
+        // necessary for the demo (which can't use hard-coded addresses) this is
+        // not a problem.
+        //
+        // We have to get the socket multiple times because of the lifetimes in
+        // `iface.get_socket` and we can only start the connection if both
+        // sockets are free.
+        let psocket = iface.get_socket::<TcpSocket>(self.participant_handle);
         if psocket.is_active() {
-            // Only transition to the next state if the socket is free (i.e.
-            // closed) and avaliable. Alternatively we could use
-            // `socket.abort()`, resulting in a non-graceful shutdown but
-            // slightly faster transition times. One downside of doing it this
-            // way is that a malicious config dealer could DoS us by never
-            // sending a Fin, but since the config dealer is only necessary for
-            // the demo (which can't use hard-coded addresses) this is not a
-            // problem.
-            return Ok(());
+            return Err(Error::SocketStillInUse);
         }
+
+        let ssocket = iface.get_socket::<TcpSocket>(self.service_handle);
+        if ssocket.is_active() {
+            return Err(Error::SocketStillInUse);
+        }
+
+        let (psocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.participant_handle);
         psocket.connect(
             cx,
             self.config.other_participant,
@@ -231,8 +257,6 @@ where
         )?;
 
         let (ssocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.service_handle);
-        // We don't need to check if the socket is in use because it never is,
-        // we're only using the participant socket for getting the config.
         ssocket.connect(
             cx,
             self.config.service_server,
@@ -423,13 +447,15 @@ where
         // we currently don't check the envelopes receiver and sender for
         // simplicity.
         match env.msg {
-            Some(Msg::AuthResponseMsg(_)) => self.propose_channel(eth_holder, withdraw_receiver),
+            Some(Msg::AuthResponseMsg(_)) => {
+                self.send_channel_proposal(eth_holder, withdraw_receiver)
+            }
             None => Ok(()),
             _ => Ok(()),
         }
     }
 
-    fn propose_channel(
+    fn send_channel_proposal(
         &mut self,
         eth_holder: Address,
         withdraw_receiver: Address,
@@ -459,7 +485,11 @@ where
         let channel = self.client.propose_channel(prop, withdraw_receiver)?;
         // Setup sub-state-machine for handling the channel
         let channel = Channel::new(channel);
-        self.state = ApplicationState::Active { channel };
+        self.state = ApplicationState::Active {
+            channel,
+            eth_holder,
+            withdraw_receiver,
+        };
         Ok(())
     }
 
@@ -542,32 +572,73 @@ where
         Ok(Some(msg))
     }
 
-    fn forward_messages_to_channel(&mut self) -> Result<(), Error> {
-        // First try receiving all the possible messages
-        let participant_msg = self.try_recv_participant_msg()?;
-        let service_msg = self.try_recv_service_msg()?;
+    /// Helper function to not duplicate code. We have to process a message
+    /// before we can continue with the second one, otherwise we might loose a
+    /// message. The same goes for checking if the channel was closed.
+    fn forward_messages<T, F1, F2>(&mut self, recv_fn: F1, process_fn: F2) -> Result<bool, Error>
+    where
+        F1: Fn(&mut Self) -> Result<Option<T>, Error>,
+        F2: Fn(&mut Channel<ProtoBufEncodingLayer<Bus<DeviceT>>>, T) -> Result<(), Error>,
+    {
+        let msg: Option<T> = recv_fn(self)?;
 
-        // Now get the (mutable) channel object so we don't get issues with mutability.
-        let channel = match self.state {
-            ApplicationState::Active { ref mut channel } => channel,
-            _ => unreachable!("This function is only called when in Active"),
-        };
+        if let Some(msg) = msg {
+            // Now get the (mutable) channel object so we don't get issues with mutability.
+            let (channel, eth_holder, withdraw_receiver) = match self.state {
+                ApplicationState::Active {
+                    ref mut channel,
+                    eth_holder,
+                    withdraw_receiver,
+                } => (channel, eth_holder, withdraw_receiver),
+                _ => unreachable!("This function is only called when in Active"),
+            };
 
-        // Apply messages. Note that processing multiple messages in one pass
-        // may be problematic, as that could (in theory) result in the need for
-        // larger tx buffers.
-        match participant_msg {
-            Some(msg) => {
-                channel.process_participant_msg(msg)?;
+            process_fn(channel, msg)?;
+
+            if channel.is_closed() {
+                self.state = ApplicationState::Configured {
+                    eth_holder,
+                    withdraw_receiver,
+                };
+                let mut iface = self.iface.borrow_mut();
+                iface
+                    .get_socket::<TcpSocket>(self.participant_handle)
+                    .close();
+                iface.get_socket::<TcpSocket>(self.service_handle).close();
             }
-            None => {}
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        match service_msg {
-            Some(ServiceReplyMessage::Funder(msg)) => channel.process_funder_reply(msg)?,
-            Some(ServiceReplyMessage::Watcher(msg)) => channel.process_watcher_reply(msg)?,
-            None => {}
+    }
+
+    fn forward_messages_to_channel(&mut self) -> Result<(), Error> {
+        let has_participant_msg = self.forward_messages(
+            |s| s.try_recv_participant_msg(),
+            |ch, msg| {
+                ch.process_participant_msg(msg)?;
+                Ok(())
+            },
+        )?;
+
+        // Only process one message, as that could have changed the channels
+        // state to Closed, which would mean we don't forward messages anymore.
+        // I don't know if that is really necessary but it has the additional
+        // benefit of allowing Interface.poll calls in between.
+        if has_participant_msg {
+            return Ok(());
         }
 
+        self.forward_messages(
+            |s| s.try_recv_service_msg(),
+            |ch, msg| {
+                match msg {
+                    ServiceReplyMessage::Funder(msg) => ch.process_funder_reply(msg)?,
+                    ServiceReplyMessage::Watcher(msg) => ch.process_watcher_reply(msg)?,
+                };
+                Ok(())
+            },
+        )?;
         Ok(())
     }
 
@@ -577,10 +648,7 @@ where
         match self.state {
             ApplicationState::InitialState => self.connect_config_dealer(),
             ApplicationState::ConnectingToConfigDealer => self.wait_connected_and_read_config(),
-            ApplicationState::Configured {
-                eth_holder,
-                withdraw_receiver,
-            } => self.connect(eth_holder, withdraw_receiver),
+            ApplicationState::Configured { .. } => Ok(()),
             ApplicationState::Connecting {
                 eth_holder,
                 withdraw_receiver,
@@ -589,14 +657,7 @@ where
                 eth_holder,
                 withdraw_receiver,
             } => self.wait_handshake_and_propose_channel(eth_holder, withdraw_receiver),
-            ApplicationState::Active { .. } => match self.forward_messages_to_channel() {
-                Err(Error::ChannelError(channel::Error::Closed)) => {
-                    self.state = ApplicationState::Closed;
-                    Ok(())
-                }
-                v => v,
-            },
-            ApplicationState::Closed => Ok(()),
+            ApplicationState::Active { .. } => self.forward_messages_to_channel(),
         }
     }
 
@@ -604,22 +665,33 @@ where
     /// updates. If the channel is not currently active it will return an error.
     pub fn update(&mut self, amount: U256, is_final: bool) -> Result<(), Error> {
         match &mut self.state {
-            ApplicationState::Active { channel } => {
+            ApplicationState::Active { channel, .. } => {
                 channel.update(amount, is_final)?;
                 Ok(())
             }
-            _ => Err(Error::ChannelNotActive),
+            _ => Err(Error::InvalidState),
         }
     }
 
-    // Force close the channel by sending a DisputeRequest to the Watcher.
+    /// Force close the channel by sending a DisputeRequest to the Watcher.
     pub fn force_close(&mut self) -> Result<(), Error> {
         match &mut self.state {
-            ApplicationState::Active { channel } => {
+            ApplicationState::Active { channel, .. } => {
                 channel.force_close()?;
                 Ok(())
             }
-            _ => Err(Error::ChannelNotActive),
+            _ => Err(Error::InvalidState),
+        }
+    }
+
+    /// Propose a new channel to the other participant.
+    pub fn propose_channel(&mut self) -> Result<(), Error> {
+        match self.state {
+            ApplicationState::Configured {
+                eth_holder,
+                withdraw_receiver,
+            } => self.connect(eth_holder, withdraw_receiver),
+            _ => Err(Error::InvalidState),
         }
     }
 

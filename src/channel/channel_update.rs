@@ -104,6 +104,10 @@ impl ChannelUpdate {
         }
     }
 
+    pub fn state(&self) -> &State {
+        &self.new_state
+    }
+
     pub fn accept(
         &mut self,
         channel: &mut ActiveChannel<impl MessageBus>,

@@ -113,10 +113,15 @@ run
 - USER Button (Blue, B1): Send 100 WEI to the other participant
 - PA0 (D32), located in CN10, marked as "TIMER", the 3rd pin from the bottom
   (side with the buttons) on the inner side: Send a normal channel closure
-  (is_final=true) by connecting it to any GND pin.
+  (is_final=true) by connecting it to any GND pin. Only valid if the channel is
+  Active.
 - PE0 (D34), located in CN10, marked as "TIMER", the 1st pin from the bottom
   (side with the buttons) on the inner side: Send a force close (dispute
-  request) by connecting it to any GND pin.
+  request) by connecting it to any GND pin. Only valid if the channel is Active.
+- PE2 (D31), located in CN10, marked as "QSPI", the 5th pin from the bottom
+  (side with the buttons) on the inner side: Propose a channel by connecting it
+  to any GND pin. Only valid if in the `Configured` (Idle) state (we have no
+  active channel and are not already in the process of proposing one).
 
 ## Feature Flags
 - `std` (default)

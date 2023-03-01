@@ -108,6 +108,8 @@ fn main() {
         DebouncedButton::new(gpioa.pa0.into_pull_up_input().erase(), DEBOUNCE_THRESHHOLD);
     let mut force_close_btn =
         DebouncedButton::new(gpioe.pe0.into_pull_up_input().erase(), DEBOUNCE_THRESHHOLD);
+    let mut propose_channel_btn =
+        DebouncedButton::new(gpioe.pe2.into_pull_up_input().erase(), DEBOUNCE_THRESHHOLD);
 
     // Ethernet (PHY)
     let eth_pins = EthPins {
@@ -248,6 +250,12 @@ fn main() {
         app.poll().unwrap();
 
         // Handle input buttons
+        if propose_channel_btn.is_falling_edge(time) {
+            match app.propose_channel() {
+                Ok(_) => green_led.toggle(),
+                Err(_) => red_led.toggle(),
+            }
+        }
         if update_btn.is_rising_edge(time) {
             match app.update(100.into(), false) {
                 Ok(_) => green_led.toggle(),

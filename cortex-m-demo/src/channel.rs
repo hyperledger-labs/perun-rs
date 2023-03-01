@@ -25,24 +25,30 @@ enum ChannelInner<'cl, B: MessageBus> {
         channel::ActiveChannel<'cl, B>,
         Option<channel::ChannelUpdate>,
     ),
-    // We store owned values in this enum and need to move the channel out of
-    // the previous enum to be able to transition to the next state. While we
-    // could lift that restriction (it is added just to forbid duplicating a
-    // channel and doesn't have anything in its drop function) that would mean
-    // less invariants in the type system. Unfortunately this means (at least as
-    // far as I can tell) that we need to have this invalid state to move to
-    // during the transition itself. It is only reachable when using reentrancy
-    // or some other multi-threaded shenanigans. It might be reachable if the
-    // transition panics for some reason instead of returning an Error. This
-    // state should be unreachable while not calling a method on the Channel.
-    //
-    // I hate having to do this but I couldn't find a good way to do it without
-    // lifting the no-duplication invariant or using unsafe blocks, which could
-    // (according to stack overflow) in the worst case result in undefined
-    // behavior in the above panic case.
+    /// We store owned values in this enum and need to move the channel out of
+    /// the previous enum to be able to transition to the next state. While we
+    /// could lift that restriction (it is added just to forbid duplicating a
+    /// channel and doesn't have anything in its drop function) that would mean
+    /// less invariants in the type system. Unfortunately this means (at least as
+    /// far as I can tell) that we need to have this invalid state to move to
+    /// during the transition itself. It is only reachable when using reentrancy
+    /// or some other multi-threaded shenanigans. It might be reachable if the
+    /// transition panics for some reason instead of returning an Error. This
+    /// state should be unreachable while not calling a method on the Channel.
+    ///
+    /// I hate having to do this but I couldn't find a good way to do it without
+    /// lifting the no-duplication invariant or using unsafe blocks, which could
+    /// (according to stack overflow) in the worst case result in undefined
+    /// behavior in the above panic case.
     TemporaryInvalidState,
 
+    /// We have agreed on an update with is_final=true, sent it to the watcher
+    /// and are now waiting for confirmation.
+    Closing(channel::ActiveChannel<'cl, B>),
+    /// We have sent a dispute request (force close request) to the watcher and
+    /// are now waiting for confirmation.
     ForceClosing,
+    /// We got the confirmation and the channel is now closed.
     Closed,
 }
 
@@ -112,6 +118,13 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
     pub fn new(channel: ProposedChannel<'cl, B>) -> Self {
         Self {
             inner: ChannelInner::Proposed(channel),
+        }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        match self.inner {
+            ChannelInner::Closed => true,
+            _ => false,
         }
     }
 
@@ -209,6 +222,10 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
             (ChannelInner::Active(_, _), WatcherReplyMessage::DisputeNotification { .. }) => {
                 Ok(ChannelInner::Closed)
             }
+            (ChannelInner::Closing(_), WatcherReplyMessage::Ack { .. }) => Ok(ChannelInner::Closed),
+            (ChannelInner::Closing(_), WatcherReplyMessage::DisputeNotification { .. }) => {
+                Ok(ChannelInner::Closed)
+            }
             (ChannelInner::ForceClosing, WatcherReplyMessage::DisputeAck { .. }) => {
                 Ok(ChannelInner::Closed)
             }
@@ -227,6 +244,7 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                     Ok(ChannelInner::Signed(ch, watching, true))
                 }
             }
+            (inner @ ChannelInner::Closing(_), _) => Err((inner, Error::Closed)),
             (inner @ ChannelInner::ForceClosing, _) => Err((inner, Error::Closed)),
             (inner @ ChannelInner::Closed, _) => Err((inner, Error::Closed)),
             (ChannelInner::TemporaryInvalidState, _) => unreachable!(),
@@ -337,7 +355,13 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                     Err(e) => return Err((ChannelInner::Active(ch, Some(update)), e.into())),
                 }
                 match update.apply(&mut ch) {
-                    Ok(_) => Ok(ChannelInner::Active(ch, None)),
+                    Ok(_) => {
+                        if update.state().is_final {
+                            Ok(ChannelInner::Closing(ch))
+                        } else {
+                            Ok(ChannelInner::Active(ch, None))
+                        }
+                    },
                     Err(e) => Err((ChannelInner::Active(ch, Some(update)), e.into())),
                 }
             }
@@ -345,6 +369,7 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                 ChannelInner::Active(ch, Some(_)),
                 ParticipantMessage::ChannelUpdateRejected { .. },
             ) => Ok(ChannelInner::Active(ch, None)),
+            (inner @ ChannelInner::Closing(_), _) => Err((inner, Error::Closed)),
             (inner @ ChannelInner::ForceClosing, _) => Err((inner, Error::Closed)),
             (inner @ ChannelInner::Closed, _) => Err((inner, Error::Closed)),
             (ChannelInner::TemporaryInvalidState, _) => unreachable!(),
