@@ -58,11 +58,12 @@ fn entry() -> ! {
     loop {}
 }
 
-const IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 2);
+const DEVICE_IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 2);
 const SERVER_IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 1);
 const SERVER_CONFIG_PORT: u16 = 1339;
 const SERVER_PARTICIPANT_PORT: u16 = 1337;
 const SERVER_SERVICE_PORT: u16 = 1338;
+const DEVICE_LISTEN_PORT: u16 = 1234;
 const CIDR_PREFIX_LEN: u8 = 24;
 const MAC_ADDRESS: EthernetAddress = EthernetAddress([0x00, 0x00, 0xDE, 0xAD, 0xBE, 0xEF]);
 const DEBOUNCE_THRESHHOLD: u64 = 100; // Milliseconds
@@ -141,7 +142,7 @@ fn main() {
     // See https://github.com/stm32-rs/stm32-eth/blob/master/CHANGELOG.md
     // We could either use the unreleased master branch of stm32-eth or use the
     // older 0.8.2 version of smoltcp.
-    let ip_addr = IpCidr::new(IP_ADDRESS.into(), CIDR_PREFIX_LEN);
+    let ip_addr = IpCidr::new(DEVICE_IP_ADDRESS.into(), CIDR_PREFIX_LEN);
     let mut ip_addrs = [ip_addr];
     let mut neighbor_storage = [None; 16];
     let neighbor_cache = NeighborCache::new(&mut neighbor_storage[..]);
@@ -198,6 +199,7 @@ fn main() {
         config_server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_CONFIG_PORT),
         other_participant: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_PARTICIPANT_PORT),
         service_server: (IpAddress::from(SERVER_IP_ADDRESS), SERVER_SERVICE_PORT),
+        listen_port: DEVICE_LISTEN_PORT,
         participants: ["Bob", "Alice"],
     };
 

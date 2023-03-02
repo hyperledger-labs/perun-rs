@@ -12,13 +12,17 @@ use perun::{
     abiencode::types::U256,
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
-        Asset,
+        Asset, ProposalBuildError,
     },
     messages::{
         ConversionError, FunderReplyMessage, LedgerChannelProposal, ParticipantMessage,
         WatcherReplyMessage,
     },
-    perunwire::{self, envelope::Msg, Envelope},
+    perunwire::{
+        self,
+        envelope::{self, Msg},
+        Envelope,
+    },
     wire::ProtoBufEncodingLayer,
     Address, Hash, InvalidProposal, PerunClient,
 };
@@ -48,6 +52,7 @@ pub struct Config {
     pub config_server: (IpAddress, u16),
     pub other_participant: (IpAddress, u16),
     pub service_server: (IpAddress, u16),
+    pub listen_port: u16,
     pub participants: [&'static str; 2],
 }
 
@@ -77,29 +82,46 @@ where
     InitialState,
     /// Setting up the TCP connection to get info about the blockchain this demo
     /// is using (eth-holder and withdraw_receiver). As soon as the connection is
-    /// established we read from it and go to `Configured`.
+    /// established we read from it and go to `ClosingParticipantSocket`.
     ConnectingToConfigDealer,
-    /// We have everything we need, wait and do nothing until someone presses a
-    /// button or we receive a channel proposal (not yet implemented).
-    Configured {
+    /// We have everything we need, wait until the setup connection is closed,
+    /// then setup TCP listening and transition to `Listening`
+    ClosingSockets {
+        eth_holder: Address,
+        withdraw_receiver: Address,
+    },
+    /// Wait and do nothing until someone presses a button or we receive a tcp
+    /// connection attempt, then transition into `Connecting` or
+    /// `WaitForProposal` respectively. In both cases connect to the
+    /// funder/watcher.
+    Listening {
+        eth_holder: Address,
+        withdraw_receiver: Address,
+    },
+    /// We have received a connection and gotten a handshake (and sent a
+    /// response handshake). Wait until we have connected to the watcher/funder
+    /// and receive a channel proposal, then accept it and transition into
+    /// `Active`.
+    WaitForProposal {
         eth_holder: Address,
         withdraw_receiver: Address,
     },
     /// Setting up the TCP connections to other participant (p2p) and remote
     /// funder/watcher. Once the connections are both established send the
-    /// handshake message and transition to `Handshake`.
+    /// handshake message and transition to `WaitForHandshake`.
     Connecting {
         eth_holder: Address,
         withdraw_receiver: Address,
     },
     /// Wait until we receive the handshake response, then propose a channel and
     /// transition to `Active`.
-    Handshake {
+    WaitForHandshake {
         eth_holder: Address,
         withdraw_receiver: Address,
     },
     /// We have an open channel, the logic of which is handled in a separate
-    /// state machine. If the channel closes transition to `Configured`.
+    /// state machine. If the channel closes transition to
+    /// `ClosingParticipantSocket`.
     Active {
         eth_holder: Address,
         withdraw_receiver: Address,
@@ -118,7 +140,7 @@ pub enum Error {
     ChannelError(channel::Error),
     InvalidState,
     MessageLargerThanRxBuffer(usize),
-    SocketStillInUse,
+    ProposalBuildError(ProposalBuildError),
 }
 
 impl From<smoltcp::Error> for Error {
@@ -144,6 +166,11 @@ impl From<ConversionError> for Error {
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Self::ChannelError(e)
+    }
+}
+impl From<ProposalBuildError> for Error {
+    fn from(e: ProposalBuildError) -> Self {
+        Self::ProposalBuildError(e)
     }
 }
 
@@ -178,7 +205,6 @@ where
     }
 
     fn connect_config_dealer(&mut self) -> Result<(), Error> {
-        // Connect to the server IP. Does not wait for the handshake to finish.
         let mut iface = self.iface.borrow_mut();
         let (socket, cx) = iface.get_socket_and_context::<TcpSocket>(self.participant_handle);
         socket.connect(
@@ -213,7 +239,7 @@ where
                     (0, None)
                 }
             })? {
-                self.state = ApplicationState::Configured {
+                self.state = ApplicationState::ClosingSockets {
                     eth_holder,
                     withdraw_receiver,
                 };
@@ -223,11 +249,11 @@ where
         Ok(())
     }
 
-    // We could do this while setting up the connection for reading the config,
-    // but doing it separately means we have one less active connection at the
-    // same time.
-    fn connect(&mut self, eth_holder: Address, withdraw_receiver: Address) -> Result<(), Error> {
-        let mut iface = self.iface.borrow_mut();
+    fn wait_connections_closed(
+        &mut self,
+        eth_holder: Address,
+        withdraw_receiver: Address,
+    ) -> Result<(), Error> {
         // Only continue if the sockets are free (i.e. closed) and avaliable.
         // Alternatively we could use `socket.abort()`, resulting in a
         // non-graceful shutdown but slightly faster transition times. One
@@ -239,17 +265,113 @@ where
         // We have to get the socket multiple times because of the lifetimes in
         // `iface.get_socket` and we can only start the connection if both
         // sockets are free.
+        let mut iface = self.iface.borrow_mut();
+        let ssocket_active = iface
+            .get_socket::<TcpSocket>(self.service_handle)
+            .is_active();
         let psocket = iface.get_socket::<TcpSocket>(self.participant_handle);
-        if psocket.is_active() {
-            return Err(Error::SocketStillInUse);
+        if !ssocket_active && !psocket.is_active() {
+            psocket.listen(self.config.listen_port)?;
+            self.state = ApplicationState::Listening {
+                eth_holder,
+                withdraw_receiver,
+            };
+        }
+        Ok(())
+    }
+
+    fn check_incomming_connection(
+        &mut self,
+        eth_holder: Address,
+        withdraw_receiver: Address,
+    ) -> Result<(), Error> {
+        // Scope iface because `try_recv_participant_msg` needs to borrow it, too.
+        {
+            let mut iface = self.iface.borrow_mut();
+            let psocket = iface.get_socket::<TcpSocket>(self.participant_handle);
+            if !psocket.is_open() || !psocket.may_recv() {
+                // We don't have a connection, yet
+                return Ok(());
+            }
         }
 
-        let ssocket = iface.get_socket::<TcpSocket>(self.service_handle);
-        if ssocket.is_active() {
-            return Err(Error::SocketStillInUse);
+        let env: Envelope = match self.try_recv(self.participant_handle)? {
+            Some(env) => env,
+            None => return Ok(()),
+        };
+
+        match env.msg {
+            Some(envelope::Msg::AuthResponseMsg(_)) => {}
+            Some(_) => return Err(Error::UnexpectedMsg),
+            None => return Err(Error::InvalidState),
         }
+
+        let my_wire_address = self.config.participants[0].into();
+
+        if env.recipient[..] != self.config.participants[0].as_bytes()[..] {
+            return Err(Error::UnexpectedMsg);
+        }
+
+        self.client
+            .send_handshake_msg(&my_wire_address, &env.sender);
+
+        let mut iface = self.iface.borrow_mut();
+        let (ssocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.service_handle);
+        ssocket.connect(
+            cx,
+            self.config.service_server,
+            (IpAddress::Unspecified, self.get_ethemeral_port()),
+        )?;
+
+        self.state = ApplicationState::WaitForProposal {
+            eth_holder,
+            withdraw_receiver,
+        };
+        Ok(())
+    }
+
+    fn wait_connected_and_proposal_msg(
+        &mut self,
+        eth_holder: Address,
+        withdraw_receiver: Address,
+    ) -> Result<(), Error> {
+        {
+            let mut iface = self.iface.borrow_mut();
+            let ssocket = iface.get_socket::<TcpSocket>(self.service_handle);
+            if !ssocket.is_open() {
+                // We don't have a connection, yet
+                return Ok(());
+            }
+        }
+
+        match self.try_recv_participant_msg()? {
+            Some(ParticipantMessage::ChannelProposal(prop)) => {
+                let mut channel = self.client.handle_proposal(prop, withdraw_receiver)?;
+                // This cannot panic because we have just created the channel
+                // and thus cannot have accepted it already.
+                channel.accept(self.rng.gen(), self.addr).unwrap();
+                let channel = channel.build().map_err(|(_, e)| e)?;
+                self.state = ApplicationState::Active {
+                    eth_holder,
+                    withdraw_receiver,
+                    channel: Channel::new_agreed_upon(channel),
+                };
+                Ok(())
+            }
+            Some(_) => Err(Error::InvalidState),
+            None => Ok(()),
+        }
+    }
+
+    /// Connect to both participant and watcher/funder, then propose a channel
+    /// in a later state.
+    fn connect(&mut self, eth_holder: Address, withdraw_receiver: Address) -> Result<(), Error> {
+        let mut iface = self.iface.borrow_mut();
 
         let (psocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.participant_handle);
+        if psocket.is_listening() {
+            psocket.abort();
+        }
         psocket.connect(
             cx,
             self.config.other_participant,
@@ -276,11 +398,6 @@ where
         withdraw_receiver: Address,
     ) -> Result<(), Error> {
         let mut iface = self.iface.borrow_mut();
-        // Wait for the service socket
-        let ssocket = iface.get_socket::<TcpSocket>(self.service_handle);
-        if !(ssocket.is_active() && ssocket.may_recv() && ssocket.may_send()) {
-            return Ok(());
-        }
 
         // Wait for the participant socket and send handshake (only transition
         // if both are ready)
@@ -302,7 +419,7 @@ where
                 .into();
             self.client.send_handshake_msg(&peers[0], &peers[1]);
 
-            self.state = ApplicationState::Handshake {
+            self.state = ApplicationState::WaitForHandshake {
                 eth_holder,
                 withdraw_receiver,
             }
@@ -437,21 +554,14 @@ where
         withdraw_receiver: Address,
     ) -> Result<(), Error> {
         // Only continue if we have a complete package and there was no decoding
-        // error.
-        let env: Envelope = match self.try_recv(self.participant_handle)? {
-            Some(env) => env,
-            None => return Ok(()),
-        };
-
-        // Make sure it is what we expect, if it is propose a channel. Note that
-        // we currently don't check the envelopes receiver and sender for
-        // simplicity.
-        match env.msg {
-            Some(Msg::AuthResponseMsg(_)) => {
+        // error. Note that we currently do not check the addresses in the
+        // envelope.
+        match self.try_recv_participant_msg()? {
+            Some(ParticipantMessage::Auth) => {
                 self.send_channel_proposal(eth_holder, withdraw_receiver)
             }
+            Some(_) => Err(Error::UnexpectedMsg),
             None => Ok(()),
-            _ => Ok(()),
         }
     }
 
@@ -506,8 +616,8 @@ where
             Msg::PingMsg(_) => unimplemented!(),
             Msg::PongMsg(_) => unimplemented!(),
             Msg::ShutdownMsg(_) => unimplemented!(),
-            Msg::AuthResponseMsg(_) => return Err(Error::UnexpectedMsg),
-            Msg::LedgerChannelProposalMsg(_) => return Err(Error::UnexpectedMsg), // Possible in the library but this Application does not support incoming requests.
+            Msg::AuthResponseMsg(_) => ParticipantMessage::Auth,
+            Msg::LedgerChannelProposalMsg(m) => ParticipantMessage::ChannelProposal(m.try_into()?), // Possible in the library but this Application does not support incoming requests.
             Msg::LedgerChannelProposalAccMsg(m) => {
                 ParticipantMessage::ProposalAccepted(m.try_into()?)
             }
@@ -596,15 +706,15 @@ where
             process_fn(channel, msg)?;
 
             if channel.is_closed() {
-                self.state = ApplicationState::Configured {
-                    eth_holder,
-                    withdraw_receiver,
-                };
                 let mut iface = self.iface.borrow_mut();
                 iface
                     .get_socket::<TcpSocket>(self.participant_handle)
                     .close();
                 iface.get_socket::<TcpSocket>(self.service_handle).close();
+                self.state = ApplicationState::ClosingSockets {
+                    eth_holder,
+                    withdraw_receiver,
+                };
             }
             Ok(true)
         } else {
@@ -648,12 +758,23 @@ where
         match self.state {
             ApplicationState::InitialState => self.connect_config_dealer(),
             ApplicationState::ConnectingToConfigDealer => self.wait_connected_and_read_config(),
-            ApplicationState::Configured { .. } => Ok(()),
+            ApplicationState::ClosingSockets {
+                eth_holder,
+                withdraw_receiver,
+            } => self.wait_connections_closed(eth_holder, withdraw_receiver),
+            ApplicationState::Listening {
+                eth_holder,
+                withdraw_receiver,
+            } => self.check_incomming_connection(eth_holder, withdraw_receiver),
+            ApplicationState::WaitForProposal {
+                eth_holder,
+                withdraw_receiver,
+            } => self.wait_connected_and_proposal_msg(eth_holder, withdraw_receiver),
             ApplicationState::Connecting {
                 eth_holder,
                 withdraw_receiver,
             } => self.wait_connected_and_send_handshake(eth_holder, withdraw_receiver),
-            ApplicationState::Handshake {
+            ApplicationState::WaitForHandshake {
                 eth_holder,
                 withdraw_receiver,
             } => self.wait_handshake_and_propose_channel(eth_holder, withdraw_receiver),
@@ -687,7 +808,7 @@ where
     /// Propose a new channel to the other participant.
     pub fn propose_channel(&mut self) -> Result<(), Error> {
         match self.state {
-            ApplicationState::Configured {
+            ApplicationState::Listening {
                 eth_holder,
                 withdraw_receiver,
             } => self.connect(eth_holder, withdraw_receiver),

@@ -8,7 +8,7 @@
 use alloc::string::String;
 use perun::{
     abiencode::types::U256,
-    channel::{self, ProposedChannel},
+    channel::{self, AgreedUponChannel, ProposedChannel},
     messages::{FunderReplyMessage, ParticipantMessage, WatcherReplyMessage},
     wire::MessageBus,
 };
@@ -118,6 +118,11 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
     pub fn new(channel: ProposedChannel<'cl, B>) -> Self {
         Self {
             inner: ChannelInner::Proposed(channel),
+        }
+    }
+    pub fn new_agreed_upon(channel: AgreedUponChannel<'cl, B>) -> Self {
+        Self {
+            inner: ChannelInner::AgreedUpon(channel),
         }
     }
 
