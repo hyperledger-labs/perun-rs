@@ -161,16 +161,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	watcher1, err := local.NewWatcher(adjudicator)
+	watcher_for_client, err := local.NewWatcher(adjudicator)
 	if err != nil {
 		panic(err)
 	}
-	watcher2, err := local.NewWatcher(adjudicator)
-	if err != nil {
-		panic(err)
-	}
-
-	c, err := client.New(perunID, bus, funder, adjudicator, wallet, watcher2)
+	c, err := client.New(perunID, bus, funder, adjudicator, wallet, watcher_for_client)
 	if err != nil {
 		panic(err)
 	}
@@ -195,8 +190,12 @@ func main() {
 	go c.Handle(proposalHandler, updateHandler)
 	go bus.Listen(listener)
 
+	watcher_for_service, err := local.NewWatcher(adjudicator)
+	if err != nil {
+		panic(err)
+	}
 	server, err := remote.NewServer(
-		remote.NewWatcherService(watcher1, adjudicator),
+		remote.NewWatcherService(watcher_for_service, adjudicator),
 		remote.NewFunderService(funder), 1338)
 	if err != nil {
 		panic(err)

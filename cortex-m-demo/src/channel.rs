@@ -235,6 +235,13 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
             (ChannelInner::ForceClosing, WatcherReplyMessage::DisputeAck { .. }) => {
                 Ok(ChannelInner::Closed)
             }
+            (
+                inner @ ChannelInner::ForceClosing,
+                WatcherReplyMessage::DisputeNotification { .. },
+            ) => Ok(inner), // Ignore it, we already know that
+            (inner @ ChannelInner::Closed, WatcherReplyMessage::DisputeNotification { .. }) => {
+                Ok(inner) // Ignore it, just in case the Watcher is slow and we receive a DisputeAck first.
+            }
             (inner @ ChannelInner::ForceClosing, _) => Err((inner, Error::Closed)),
             (ChannelInner::TemporaryInvalidState, _) => unreachable!(),
             (inner, _) => Err((inner, Error::InvalidState)),

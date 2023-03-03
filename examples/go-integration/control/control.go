@@ -123,7 +123,7 @@ func (s *ControlService) processCmd(cmd string, w *bufio.Writer) error {
 			return s.update(index, 0, true)
 		})
 	case "f", "force-close":
-		writeString("Not yet implemented\n")
+		return s.dispatch_with_index_default_last(args, s.force_close_channel)
 	case "s", "status":
 		s.printStatus(w)
 	default:
@@ -233,7 +233,7 @@ func (s *ControlService) force_close_channel(index int) error {
 	if err != nil {
 		return err
 	}
-	return ch.ForceUpdate(context.Background(), func(*channel.State) {})
+	return ch.Settle(context.Background(), false)
 }
 
 func (s *ControlService) update(index int, amount int64, is_final bool) error {
