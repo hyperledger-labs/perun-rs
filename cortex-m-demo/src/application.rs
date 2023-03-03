@@ -12,7 +12,7 @@ use perun::{
     abiencode::types::U256,
     channel::{
         fixed_size_payment::{Allocation, Balances, ParticipantBalances},
-        Asset, ProposalBuildError,
+        Asset, ProposalBuildError, SignError,
     },
     messages::{
         ConversionError, FunderReplyMessage, LedgerChannelProposal, ParticipantMessage,
@@ -141,6 +141,7 @@ pub enum Error {
     InvalidState,
     MessageLargerThanRxBuffer(usize),
     ProposalBuildError(ProposalBuildError),
+    SignError(SignError),
 }
 
 impl From<smoltcp::Error> for Error {
@@ -171,6 +172,11 @@ impl From<channel::Error> for Error {
 impl From<ProposalBuildError> for Error {
     fn from(e: ProposalBuildError) -> Self {
         Self::ProposalBuildError(e)
+    }
+}
+impl From<SignError> for Error {
+    fn from(e: SignError) -> Self {
+        Self::SignError(e)
     }
 }
 
@@ -347,10 +353,15 @@ where
         match self.try_recv_participant_msg()? {
             Some(ParticipantMessage::ChannelProposal(prop)) => {
                 let mut channel = self.client.handle_proposal(prop, withdraw_receiver)?;
-                // This cannot panic because we have just created the channel
-                // and thus cannot have accepted it already.
+                // Accept the proposal (this can not fail because we only just
+                // got the channel and so we cannot have accepted it already).
                 channel.accept(self.rng.gen(), self.addr).unwrap();
-                let channel = channel.build().map_err(|(_, e)| e)?;
+                // Immediately process into an agreed upon channel (because we
+                // have just accepted it and this state machine only supports
+                // 2-participant channels).
+                let mut channel = channel.build().map_err(|(_, e)| e)?;
+                // We also have to sign it.
+                channel.sign()?;
                 self.state = ApplicationState::Active {
                     eth_holder,
                     withdraw_receiver,

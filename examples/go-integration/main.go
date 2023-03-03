@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -10,11 +11,13 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
@@ -28,10 +31,14 @@ import (
 	perunlogrus "perun.network/go-perun/log/logrus"
 	"perun.network/go-perun/wallet"
 	"perun.network/go-perun/watcher/local"
+	"perun.network/go-perun/wire"
 	wirenet "perun.network/go-perun/wire/net"
 	"perun.network/go-perun/wire/net/simple"
 	"perun.network/go-perun/wire/protobuf"
 )
+
+var active_channel_lock sync.Mutex
+var active_channel *client.Channel
 
 func ToWei(value int64, denomination string) *big.Int {
 	// if denomination == "ether" or denomination == "eth":
@@ -149,9 +156,11 @@ func main() {
 		adjudicator_account,
 	)
 	perunID := simple.NewAddress("Alice")
+	dialer := simple.NewTCPDialer(time.Minute)
+	dialer.Register(simple.NewAddress("Bob"), "10.0.0.2:1234")
 	bus := wirenet.NewBus(
 		simple.NewAccount(perunID),
-		simple.NewTCPDialer(time.Minute),
+		dialer,
 		protobuf.Serializer(),
 	)
 	wallet, err := phd.NewWallet(w, accounts.DefaultBaseDerivationPath.String(), 0)
@@ -224,6 +233,68 @@ func main() {
 		}
 	}()
 
+	// Control server
+	go func() {
+		l, err := net.Listen("tcp", ":2222")
+		if err != nil {
+			panic(err)
+		}
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				panic(err)
+			}
+			r := bufio.NewScanner(conn)
+			w := bufio.NewWriter(conn)
+			writeString := func(str string) {
+				_, err := w.WriteString(str)
+				if err != nil {
+					panic(err)
+				}
+				w.Flush()
+				if err != nil {
+					panic(err)
+				}
+			}
+			writeString("Participant control service\nWrite h for help\n> ")
+			for r.Scan() {
+				switch r.Text() {
+				case "h", "help":
+					writeString("" +
+						"  h, help        : Print this message\n" +
+						"  q, quit        : Exit the control service (the go-side is still running afterwards)\n" +
+						"  p, propose     : Propose a channel\n" +
+						"  u, update      : Update the current channel\n" +
+						"  c, close       : Close the channel\n" +
+						"  f, force-close : Force close the channel\n" +
+						"  s, status      : Short status report on the channel\n",
+					)
+				case "q", "quit":
+					break
+				case "p", "propose":
+					err := propose_channel(c, eth_holder, funder_account.Address)
+					if err != nil {
+						writeString(err.Error())
+					}
+				case "u", "update":
+					writeString("Not yet implemented\n")
+				case "c", "close":
+					err := close_channel()
+					if err != nil {
+						writeString(err.Error())
+					}
+				case "f", "force-close":
+					writeString("Not yet implemented\n")
+				case "s", "status":
+					writeString("Not yet implemented\n")
+				default:
+					writeString("Unknown command\n")
+				}
+				writeString("> ")
+			}
+		}
+	}()
+
 	// Wait for Ctrl+C
 	println("Press Ctrl+C to stop")
 	stop := make(chan os.Signal, 1)
@@ -233,6 +304,53 @@ func main() {
 	c.Close()
 	bus.Close()
 	println("Done")
+}
+
+func propose_channel(c *client.Client, eth_holder common.Address, participant common.Address) error {
+	active_channel_lock.Lock()
+	defer active_channel_lock.Unlock()
+
+	peers := []wire.Address{simple.NewAddress("Alice"), simple.NewAddress("Bob")}
+	initBals := &channel.Allocation{
+		Assets: []channel.Asset{
+			&ethchannel.Asset{
+				ChainID: ethchannel.ChainID{
+					Int: big.NewInt(1337),
+				},
+				AssetHolder: ethwallet.Address(eth_holder),
+			},
+		},
+		Balances: [][]*big.Int{
+			{
+				big.NewInt(100_000),
+				big.NewInt(100_000),
+			},
+		},
+		Locked: []channel.SubAlloc{},
+	}
+	addr := ethwallet.Address(participant)
+	proposal, err := client.NewLedgerChannelProposal(16, &addr, initBals, peers)
+	if err != nil {
+		return err
+	}
+	channel, err := c.ProposeChannel(context.Background(), proposal)
+	if err != nil {
+		return err
+	}
+	active_channel = channel
+	return nil
+}
+
+func close_channel() error {
+	active_channel_lock.Lock()
+	defer active_channel_lock.Unlock()
+
+	err := active_channel.Close()
+	if err != nil {
+		return err
+	}
+	active_channel = nil
+	return nil
 }
 
 type ProposalHandler struct {

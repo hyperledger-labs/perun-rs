@@ -355,7 +355,9 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                 ChannelInner::Active(mut ch, Some(mut update)),
                 ParticipantMessage::ChannelUpdateAccepted(msg),
             ) => {
-                match update.participant_accepted(&ch, 1, msg) {
+                // Technical debt: Doing this limits us to two-participant
+                // channels (go-perun currently does the same).
+                match update.participant_accepted(&ch, 1 - ch.part_idx(), msg) {
                     Ok(_) => {}
                     Err(e) => return Err((ChannelInner::Active(ch, Some(update)), e.into())),
                 }
