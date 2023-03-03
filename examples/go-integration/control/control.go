@@ -101,13 +101,13 @@ func (s *ControlService) processCmd(cmd string, w *bufio.Writer) error {
 	switch cmd {
 	case "h", "help":
 		writeString("" +
-			"  h, help            Print this message\n" +
-			"  q, quit            Exit the control service (the go-side is still running afterwards)\n" +
-			"  p, propose         Propose a channel\n" +
-			"  u, update          Update the current channel\n" +
-			"  c, close [<index>] Close the channel\n" +
-			"  f, force-close     Force close the channel\n" +
-			"  s, status          Short status report on the channel\n",
+			"  h, help                  Print this message\n" +
+			"  q, quit                  Exit the control service (the go-side is still running afterwards)\n" +
+			"  p, propose               Propose a channel\n" +
+			"  u, update [<index>]      Update the current channel\n" +
+			"  c, close [<index>]       Close the channel\n" +
+			"  f, force-close [<index>] Force close the channel\n" +
+			"  s, status                Short status report on the channel\n",
 		)
 	case "p", "propose":
 		err := s.propose_channel()

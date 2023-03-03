@@ -123,6 +123,20 @@ run
   to any GND pin. Only valid if in the `Configured` (Idle) state (we have no
   active channel and are not already in the process of proposing one).
 
+## go-side I/O
+The go-side can be controlled via TCP port 2222, allowing you to send channel
+proposals, updates and be able to close the channel. Additionally it provides a
+`status` command that prints the state of all channels known to the go-side. As
+there is only one active channel on the rust-side. Be careful to use the
+commands with an index (in the list shown with `status`, not the channel ID)
+when there are channels to other participants or when communicating with
+multiple embedded devices, otherwise you may close a different channel.
+
+The easiest way to use this is with netcat:
+```bash
+ncat 127.0.0.1 2222
+```
+
 ## Feature Flags
 - `std` (default)
 - `k256` (default) Use [`k256`](https://crates.io/crates/k256) for signatures
