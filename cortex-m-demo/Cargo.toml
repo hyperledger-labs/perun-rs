@@ -9,7 +9,8 @@ edition = "2021"
 [dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.2"
-panic-halt = "0.2.0"
+# panic-halt = "0.2.0"
+panic-semihosting = "0.6.0"
 embedded-alloc = "0.5.0"
 rand_core = "0.6.4"
 rand = { version = "0.8.5", default-features = false, features = ["std_rng"] }

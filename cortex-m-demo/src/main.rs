@@ -35,7 +35,8 @@ use stm32_eth::{
 };
 
 // Panic handler
-use panic_halt as _;
+// use panic_halt as _;
+use panic_semihosting as _;
 
 extern crate alloc;
 
