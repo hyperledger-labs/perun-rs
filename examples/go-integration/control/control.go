@@ -115,18 +115,13 @@ func (s *ControlService) processCmd(cmd string, w *bufio.Writer) error {
 			writeString(err.Error())
 		}
 	case "u", "update":
-		writeString("Not yet implemented\n")
+		return s.dispatch_with_index_default_last(args, func(index int) error {
+			return s.update(index, 100, false)
+		})
 	case "c", "close":
-		switch len(args) {
-		case 0:
-			return s.close_last_channel()
-		case 1:
-			index, err := strconv.Atoi(args[0])
-			if err != nil {
-				return err
-			}
-			return s.close_channel(index)
-		}
+		return s.dispatch_with_index_default_last(args, func(index int) error {
+			return s.update(index, 0, true)
+		})
 	case "f", "force-close":
 		writeString("Not yet implemented\n")
 	case "s", "status":
@@ -207,23 +202,51 @@ func (h adjudicatorEventHandler) HandleAdjudicatorEvent(channel.AdjudicatorEvent
 	}
 }
 
-func (s *ControlService) close_last_channel() error {
-	return s.close_channel(len(s.channelsIds) - 1)
+func (s *ControlService) dispatch_with_index_default_last(args []string, fn func(index int) error) error {
+	return s.dispatch_with_index(args, len(s.channelsIds)-1, fn)
 }
 
-func (s *ControlService) close_channel(index int) error {
+func (s *ControlService) dispatch_with_index(args []string, default_value int, fn func(index int) error) error {
+	switch len(args) {
+	case 0:
+		return fn(default_value)
+	case 1:
+		index, err := strconv.Atoi(args[0])
+		if err != nil {
+			return err
+		}
+		return fn(index)
+	default:
+		return fmt.Errorf("Invalid argument count")
+	}
+}
+
+func (s *ControlService) get_channel(index int) (*client.Channel, error) {
 	if index >= len(s.channelsIds) {
-		return fmt.Errorf("Index out of bounds")
+		return nil, fmt.Errorf("Index out of bounds")
 	}
-	ch, err := s.client.Channel(s.channelsIds[index])
+	return s.client.Channel(s.channelsIds[index])
+}
+
+func (s *ControlService) force_close_channel(index int) error {
+	ch, err := s.get_channel(index)
 	if err != nil {
 		return err
 	}
-	err = ch.Close()
+	return ch.ForceUpdate(context.Background(), func(*channel.State) {})
+}
+
+func (s *ControlService) update(index int, amount int64, is_final bool) error {
+	ch, err := s.get_channel(index)
 	if err != nil {
 		return err
 	}
-	return nil
+	return ch.Update(context.Background(), func(s *channel.State) {
+		part_idx := ch.Idx()
+		s.Balances[0][part_idx].Sub(s.Balances[0][part_idx], big.NewInt(amount))
+		s.Balances[0][1-part_idx].Add(s.Balances[0][1-part_idx], big.NewInt(amount))
+		s.IsFinal = is_final
+	})
 }
 
 func (s *ControlService) printStatus(w io.Writer) {

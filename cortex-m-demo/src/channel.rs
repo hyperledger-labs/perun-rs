@@ -181,8 +181,9 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                 if new_state.outcome.balances.0[0].0[1] < amount {
                     return Err(Error::NotEnoughFunds);
                 }
-                new_state.outcome.balances.0[0].0[0] += amount;
-                new_state.outcome.balances.0[0].0[1] -= amount;
+                let part_idx = ch.part_idx();
+                new_state.outcome.balances.0[0].0[1 - part_idx] += amount;
+                new_state.outcome.balances.0[0].0[part_idx] -= amount;
                 new_state.is_final = is_final;
                 match ch.update(new_state) {
                     Ok(u) => {
@@ -349,7 +350,11 @@ impl<'cl, B: MessageBus> Channel<'cl, B> {
                     Ok(_) => {}
                     Err(e) => return Err((ChannelInner::Active(ch, None), e.into())),
                 }
-                Ok(ChannelInner::Active(ch, None))
+                if update.state().is_final {
+                    Ok(ChannelInner::Closing(ch))
+                } else {
+                    Ok(ChannelInner::Active(ch, None))
+                }
             }
             (
                 ChannelInner::Active(mut ch, Some(mut update)),
