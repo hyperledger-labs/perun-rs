@@ -1,23 +1,21 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"fmt"
+	"go-integration/control"
 	remote "go-integration/perun-remote"
 	"math/big"
 	"net"
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
@@ -31,14 +29,10 @@ import (
 	perunlogrus "perun.network/go-perun/log/logrus"
 	"perun.network/go-perun/wallet"
 	"perun.network/go-perun/watcher/local"
-	"perun.network/go-perun/wire"
 	wirenet "perun.network/go-perun/wire/net"
 	"perun.network/go-perun/wire/net/simple"
 	"perun.network/go-perun/wire/protobuf"
 )
-
-var active_channel_lock sync.Mutex
-var active_channel *client.Channel
 
 func ToWei(value int64, denomination string) *big.Int {
 	// if denomination == "ether" or denomination == "eth":
@@ -167,12 +161,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	watcher, err := local.NewWatcher(adjudicator)
+	watcher1, err := local.NewWatcher(adjudicator)
+	if err != nil {
+		panic(err)
+	}
+	watcher2, err := local.NewWatcher(adjudicator)
 	if err != nil {
 		panic(err)
 	}
 
-	c, err := client.New(perunID, bus, funder, adjudicator, wallet, watcher)
+	c, err := client.New(perunID, bus, funder, adjudicator, wallet, watcher2)
 	if err != nil {
 		panic(err)
 	}
@@ -180,8 +178,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	controlService := control.NewControlService(c, eth_holder, funder_account.Address)
+
 	var proposalHandler client.ProposalHandler = ProposalHandler{
-		addr: bob_account.Address(),
+		addr:           bob_account.Address(),
+		controlService: &controlService,
 	}
 	var updateHandler client.UpdateHandler = UpdateHandler{}
 
@@ -194,7 +196,7 @@ func main() {
 	go bus.Listen(listener)
 
 	server, err := remote.NewServer(
-		remote.NewWatcherService(watcher, adjudicator),
+		remote.NewWatcherService(watcher1, adjudicator),
 		remote.NewFunderService(funder), 1338)
 	if err != nil {
 		panic(err)
@@ -235,63 +237,9 @@ func main() {
 
 	// Control server
 	go func() {
-		l, err := net.Listen("tcp", ":2222")
+		err := controlService.Run()
 		if err != nil {
 			panic(err)
-		}
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				panic(err)
-			}
-			r := bufio.NewScanner(conn)
-			w := bufio.NewWriter(conn)
-			writeString := func(str string) {
-				_, err := w.WriteString(str)
-				if err != nil {
-					panic(err)
-				}
-				w.Flush()
-				if err != nil {
-					panic(err)
-				}
-			}
-			writeString("Participant control service\nWrite h for help\n> ")
-			for r.Scan() {
-				switch r.Text() {
-				case "h", "help":
-					writeString("" +
-						"  h, help        : Print this message\n" +
-						"  q, quit        : Exit the control service (the go-side is still running afterwards)\n" +
-						"  p, propose     : Propose a channel\n" +
-						"  u, update      : Update the current channel\n" +
-						"  c, close       : Close the channel\n" +
-						"  f, force-close : Force close the channel\n" +
-						"  s, status      : Short status report on the channel\n",
-					)
-				case "q", "quit":
-					break
-				case "p", "propose":
-					err := propose_channel(c, eth_holder, funder_account.Address)
-					if err != nil {
-						writeString(err.Error())
-					}
-				case "u", "update":
-					writeString("Not yet implemented\n")
-				case "c", "close":
-					err := close_channel()
-					if err != nil {
-						writeString(err.Error())
-					}
-				case "f", "force-close":
-					writeString("Not yet implemented\n")
-				case "s", "status":
-					writeString("Not yet implemented\n")
-				default:
-					writeString("Unknown command\n")
-				}
-				writeString("> ")
-			}
 		}
 	}()
 
@@ -306,55 +254,9 @@ func main() {
 	println("Done")
 }
 
-func propose_channel(c *client.Client, eth_holder common.Address, participant common.Address) error {
-	active_channel_lock.Lock()
-	defer active_channel_lock.Unlock()
-
-	peers := []wire.Address{simple.NewAddress("Alice"), simple.NewAddress("Bob")}
-	initBals := &channel.Allocation{
-		Assets: []channel.Asset{
-			&ethchannel.Asset{
-				ChainID: ethchannel.ChainID{
-					Int: big.NewInt(1337),
-				},
-				AssetHolder: ethwallet.Address(eth_holder),
-			},
-		},
-		Balances: [][]*big.Int{
-			{
-				big.NewInt(100_000),
-				big.NewInt(100_000),
-			},
-		},
-		Locked: []channel.SubAlloc{},
-	}
-	addr := ethwallet.Address(participant)
-	proposal, err := client.NewLedgerChannelProposal(16, &addr, initBals, peers)
-	if err != nil {
-		return err
-	}
-	channel, err := c.ProposeChannel(context.Background(), proposal)
-	if err != nil {
-		return err
-	}
-	active_channel = channel
-	return nil
-}
-
-func close_channel() error {
-	active_channel_lock.Lock()
-	defer active_channel_lock.Unlock()
-
-	err := active_channel.Close()
-	if err != nil {
-		return err
-	}
-	active_channel = nil
-	return nil
-}
-
 type ProposalHandler struct {
-	addr wallet.Address
+	addr           wallet.Address
+	controlService *control.ControlService
 }
 
 // HandleProposal implements client.ProposalHandler
@@ -367,13 +269,14 @@ func (ph ProposalHandler) HandleProposal(proposal client.ChannelProposal, res *c
 		panic(err)
 	}
 
-	_, err = res.Accept(context.Background(), &client.LedgerChannelProposalAccMsg{
+	ch, err := res.Accept(context.Background(), &client.LedgerChannelProposalAccMsg{
 		BaseChannelProposalAcc: client.BaseChannelProposalAcc{
 			ProposalID: proposal.Base().ProposalID,
 			NonceShare: nonce_share,
 		},
 		Participant: ph.addr,
 	})
+	ph.controlService.RegisterChannel(ch)
 	if err != nil {
 		panic(err)
 	}
