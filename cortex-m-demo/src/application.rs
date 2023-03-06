@@ -82,7 +82,7 @@ where
     InitialState,
     /// Setting up the TCP connection to get info about the blockchain this demo
     /// is using (eth-holder and withdraw_receiver). As soon as the connection is
-    /// established we read from it and go to `ClosingParticipantSocket`.
+    /// established we read from it and go to `ClosingSockets`.
     ConnectingToConfigDealer,
     /// We have everything we need, wait until the setup connection is closed,
     /// then setup TCP listening and transition to `Listening`
@@ -121,7 +121,7 @@ where
     },
     /// We have an open channel, the logic of which is handled in a separate
     /// state machine. If the channel closes transition to
-    /// `ClosingParticipantSocket`.
+    /// `ClosingSockets`.
     Active {
         eth_holder: Address,
         withdraw_receiver: Address,
@@ -380,6 +380,8 @@ where
         let mut iface = self.iface.borrow_mut();
 
         let (psocket, cx) = iface.get_socket_and_context::<TcpSocket>(self.participant_handle);
+        // Stop the TCP listener, we need the socket ourselves and cannot have
+        // multiple active channels anyways.
         if psocket.is_listening() {
             psocket.abort();
         }
