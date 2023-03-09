@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"go-integration/control"
 	remote "go-integration/perun-remote"
 	"math/big"
 	"net"
@@ -148,22 +149,23 @@ func main() {
 		funder_account.Address,
 		adjudicator_account,
 	)
-	perunID := simple.NewAddress("Bob")
+	perunID := simple.NewAddress("Alice")
+	dialer := simple.NewTCPDialer(time.Minute)
+	dialer.Register(simple.NewAddress("Bob"), "10.0.0.2:1234")
 	bus := wirenet.NewBus(
 		simple.NewAccount(perunID),
-		simple.NewTCPDialer(time.Minute),
+		dialer,
 		protobuf.Serializer(),
 	)
 	wallet, err := phd.NewWallet(w, accounts.DefaultBaseDerivationPath.String(), 0)
 	if err != nil {
 		panic(err)
 	}
-	watcher, err := local.NewWatcher(adjudicator)
+	watcher_for_client, err := local.NewWatcher(adjudicator)
 	if err != nil {
 		panic(err)
 	}
-
-	c, err := client.New(perunID, bus, funder, adjudicator, wallet, watcher)
+	c, err := client.New(perunID, bus, funder, adjudicator, wallet, watcher_for_client)
 	if err != nil {
 		panic(err)
 	}
@@ -171,12 +173,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	controlService := control.NewControlService(c, eth_holder, funder_account.Address)
+
 	var proposalHandler client.ProposalHandler = ProposalHandler{
-		addr: bob_account.Address(),
+		addr:           bob_account.Address(),
+		controlService: &controlService,
 	}
 	var updateHandler client.UpdateHandler = UpdateHandler{}
 
-	listener, err := simple.NewTCPListener("127.0.0.1:1337")
+	listener, err := simple.NewTCPListener(":1337")
 	if err != nil {
 		panic(err)
 	}
@@ -184,8 +190,12 @@ func main() {
 	go c.Handle(proposalHandler, updateHandler)
 	go bus.Listen(listener)
 
+	watcher_for_service, err := local.NewWatcher(adjudicator)
+	if err != nil {
+		panic(err)
+	}
 	server, err := remote.NewServer(
-		remote.NewWatcherService(watcher, adjudicator),
+		remote.NewWatcherService(watcher_for_service, adjudicator),
 		remote.NewFunderService(funder), 1338)
 	if err != nil {
 		panic(err)
@@ -199,7 +209,7 @@ func main() {
 		// information like the ETH holder address. (needed for this example,
 		// we're assuming the application already knows these values (for now
 		// at least))
-		l, err := net.Listen("tcp", "127.0.0.1:1339")
+		l, err := net.Listen("tcp", ":1339")
 		if err != nil {
 			panic(err)
 		}
@@ -209,6 +219,8 @@ func main() {
 				panic(err)
 			}
 
+			// Note that using two `conn.Write` calls here is not ideal, as it
+			// causes two separate 20-byte payload TCP segments.
 			_, err = conn.Write(eth_holder.Bytes())
 			if err != nil {
 				panic(err)
@@ -217,6 +229,16 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
+
+			conn.Close()
+		}
+	}()
+
+	// Control server
+	go func() {
+		err := controlService.Run()
+		if err != nil {
+			panic(err)
 		}
 	}()
 
@@ -232,7 +254,8 @@ func main() {
 }
 
 type ProposalHandler struct {
-	addr wallet.Address
+	addr           wallet.Address
+	controlService *control.ControlService
 }
 
 // HandleProposal implements client.ProposalHandler
@@ -245,13 +268,14 @@ func (ph ProposalHandler) HandleProposal(proposal client.ChannelProposal, res *c
 		panic(err)
 	}
 
-	_, err = res.Accept(context.Background(), &client.LedgerChannelProposalAccMsg{
+	ch, err := res.Accept(context.Background(), &client.LedgerChannelProposalAccMsg{
 		BaseChannelProposalAcc: client.BaseChannelProposalAcc{
 			ProposalID: proposal.Base().ProposalID,
 			NonceShare: nonce_share,
 		},
 		Participant: ph.addr,
 	})
+	ph.controlService.RegisterChannel(ch)
 	if err != nil {
 		panic(err)
 	}

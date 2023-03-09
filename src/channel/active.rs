@@ -68,10 +68,10 @@ pub enum InvalidUpdate {
 }
 
 #[derive(Debug)]
-pub struct ActiveChannel<'a, B: MessageBus> {
+pub struct ActiveChannel<'cl, B: MessageBus> {
     part_idx: PartIdx,
     withdraw_receiver: Address,
-    client: &'a PerunClient<B>,
+    client: &'cl PerunClient<B>,
     state: State,
     params: Params,
     signatures: [Signature; PARTICIPANTS],
@@ -103,6 +103,9 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
 
     pub fn channel_id(&self) -> Hash {
         self.state.channel_id()
+    }
+    pub fn version(&self) -> u64 {
+        self.state.version()
     }
 
     pub fn state(&self) -> State {
@@ -144,10 +147,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         }
     }
 
-    pub fn update<'ch>(
-        &'ch mut self,
-        new_state: State,
-    ) -> Result<ChannelUpdate<'ch, 'cl, B>, ProposeUpdateError> {
+    pub fn update(&self, new_state: State) -> Result<ChannelUpdate, ProposeUpdateError> {
         self.check_valid_transition(new_state)?;
 
         // Sign immediately, we need the signature to send the proposal.
@@ -166,10 +166,10 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
         Ok(ChannelUpdate::new(self, new_state, self.part_idx, sig))
     }
 
-    pub fn handle_update<'ch>(
-        &'ch mut self,
+    pub fn handle_update(
+        &self,
         msg: LedgerChannelUpdate,
-    ) -> Result<ChannelUpdate<'ch, 'cl, B>, HandleUpdateError> {
+    ) -> Result<ChannelUpdate, HandleUpdateError> {
         self.check_valid_transition(msg.state)?;
 
         let hash = abiencode::to_hash(&msg.state)?;
@@ -248,9 +248,7 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     }
 
     // Use `update()` if the state has to change, too
-    pub fn close_normal<'ch>(
-        &'ch mut self,
-    ) -> Result<ChannelUpdate<'ch, 'cl, B>, ProposeUpdateError> {
+    pub fn close_normal(&self) -> Result<ChannelUpdate, ProposeUpdateError> {
         let mut new_state = self.state.make_next_state();
         new_state.is_final = true;
         self.update(new_state)
@@ -259,10 +257,14 @@ impl<'cl, B: MessageBus> ActiveChannel<'cl, B> {
     // At the moment this just drops the channel after sending the message. In
     // the future it might make sense to have a struct representing a closing
     // channel, for example to allow resending the last message.
-    pub fn force_close(self) -> Result<(), SignError> {
+    pub fn force_close(self) -> Result<(), (Self, SignError)> {
+        let watch_info = match self.make_watch_info() {
+            Ok(v) => v,
+            Err(e) => return Err((self, e)),
+        };
         self.client
             .bus
-            .send_to_watcher(WatcherRequestMessage::StartDispute(self.make_watch_info()?));
+            .send_to_watcher(WatcherRequestMessage::StartDispute(watch_info));
         Ok(())
     }
 

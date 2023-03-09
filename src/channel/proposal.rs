@@ -39,11 +39,11 @@ pub enum HandleAcceptError {
 
 /// Error returned when the transition from ProposedChannel -> AgreedUponChannel failed.
 #[derive(Debug)]
-pub enum BuildError {
+pub enum ProposalBuildError {
     AbiEncodeError(abiencode::Error),
     MissingAccResponse(PartIdx),
 }
-impl From<abiencode::Error> for BuildError {
+impl From<abiencode::Error> for ProposalBuildError {
     fn from(e: abiencode::Error) -> Self {
         Self::AbiEncodeError(e)
     }
@@ -55,13 +55,13 @@ impl From<abiencode::Error> for BuildError {
 /// Use `build()` or `try_into()` to get an [AgreedUponChannel], to sign the
 /// initial state and exchange those signatures.
 #[derive(Debug)]
-pub struct ProposedChannel<'a, B: MessageBus> {
+pub struct ProposedChannel<'cl, B: MessageBus> {
     /// Who are we in this channel (0 is the channel proposer).
     part_idx: PartIdx,
     /// Who should receive funds when withdrawing
     withdraw_receiver: Address,
     /// Reference to the PerunClient, used for communication.
-    client: &'a PerunClient<B>,
+    client: &'cl PerunClient<B>,
     /// Needed for creating the initial state, Params and for the application to
     /// decide if those are valid Parameters.
     proposal: LedgerChannelProposal,
@@ -73,13 +73,13 @@ pub struct ProposedChannel<'a, B: MessageBus> {
     responses: [Option<LedgerChannelProposalAcc>; 1],
 }
 
-impl<'a, B: MessageBus> ProposedChannel<'a, B> {
+impl<'cl, B: MessageBus> ProposedChannel<'cl, B> {
     /// Create a new ProposedChannel.
     ///
     /// The caller ([PerunClient]) is responsible for sending the proposal
     /// message to all participants.
     pub(crate) fn new(
-        client: &'a PerunClient<B>,
+        client: &'cl PerunClient<B>,
         part_idx: PartIdx,
         withdraw_receiver: Address,
         proposal: LedgerChannelProposal,
@@ -176,7 +176,12 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     /// on-chain). Checking this is not the task of this class, which is only
     /// concerned about a single channel. Go-perun does this check in
     /// `completeCPP`.
-    pub fn build(self) -> Result<AgreedUponChannel<'a, B>, BuildError> {
+    ///
+    /// In the case of an error we still want the caller to be able to recover
+    /// from it, so we have to give self back. If we wouldn't do that the caller
+    /// would be forced to (implicitly) throw away the entire channel, so we
+    /// could just as well have paniced in case of an error.
+    pub fn build(self) -> Result<AgreedUponChannel<'cl, B>, (Self, ProposalBuildError)> {
         let mut participants = [Address::default(); PARTICIPANTS];
         participants[0] = self.proposal.participant;
 
@@ -199,7 +204,10 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
         // would optimize away).
         for (index, res) in self.responses.iter().enumerate() {
             // Unwrap all responses, returning an error if one is missing
-            let res = res.ok_or(BuildError::MissingAccResponse(index + 1))?;
+            let res = match res {
+                Some(v) => v,
+                None => return Err((self, ProposalBuildError::MissingAccResponse(index + 1))),
+            };
 
             // Store in new participants list that doesn't use options and
             // combine the nonces
@@ -219,7 +227,10 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
             ledger_channel: true,
             virtual_channel: false,
         };
-        let init_state = State::new(params, self.proposal.init_bals)?;
+        let init_state = match State::new(params, self.proposal.init_bals) {
+            Ok(v) => v,
+            Err(e) => return Err((self, e.into())),
+        };
 
         Ok(AgreedUponChannel::new(
             self.client,
@@ -233,10 +244,10 @@ impl<'a, B: MessageBus> ProposedChannel<'a, B> {
     }
 }
 
-impl<'a, B: MessageBus> TryFrom<ProposedChannel<'a, B>> for AgreedUponChannel<'a, B> {
-    type Error = BuildError;
+impl<'cl, B: MessageBus> TryFrom<ProposedChannel<'cl, B>> for AgreedUponChannel<'cl, B> {
+    type Error = (ProposedChannel<'cl, B>, ProposalBuildError);
 
-    fn try_from(value: ProposedChannel<'a, B>) -> Result<Self, Self::Error> {
+    fn try_from(value: ProposedChannel<'cl, B>) -> Result<Self, Self::Error> {
         value.build()
     }
 }

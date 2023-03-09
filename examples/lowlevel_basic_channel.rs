@@ -186,8 +186,8 @@ async fn alice(bus: Bus) {
             let mut update = channel.handle_update(msg).unwrap();
             print_user_interaction!("Alice accepts or rejects the update");
             if ALICE_ACCEPTS_UPDATE {
-                update.accept().unwrap();
-                update.apply().unwrap();
+                update.accept(&mut channel).unwrap();
+                update.apply(&mut channel).unwrap();
                 // Receive ack from Watcher. If we don't get an ack immediately
                 // it is not a problem, the application/caller/user of the
                 // low-level API has to at some point make sure to get the
@@ -196,7 +196,7 @@ async fn alice(bus: Bus) {
                 // service.
                 bus.service_rx.recv().unwrap();
             } else {
-                update.reject("Alice configured to reject update");
+                update.reject(&mut channel, "Alice configured to reject update");
             }
         }
         _ => panic!("Unexpected Message or channel closure"),
@@ -209,8 +209,8 @@ async fn alice(bus: Bus) {
         let mut update = channel.close_normal().unwrap();
         match bus.rx.recv() {
             Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
-                update.participant_accepted(1, msg).unwrap();
-                update.apply().unwrap();
+                update.participant_accepted(&mut channel, 1, msg).unwrap();
+                update.apply(&mut channel).unwrap();
                 bus.service_rx.recv().unwrap(); // Receive Ack from Watcher
                 print_bold!("Alice done: Channel closed normally and the Watcher has the data");
                 return;
@@ -308,8 +308,8 @@ async fn bob(bus: Bus) {
     let mut update = channel.update(new_state).unwrap();
     let accepted = match bus.rx.recv() {
         Ok(ParticipantMessage::ChannelUpdateAccepted(msg)) => {
-            update.participant_accepted(0, msg).unwrap();
-            update.apply().unwrap();
+            update.participant_accepted(&mut channel, 0, msg).unwrap();
+            update.apply(&mut channel).unwrap();
             true
         }
         Ok(ParticipantMessage::ChannelUpdateRejected { .. }) => {
@@ -360,13 +360,13 @@ async fn bob(bus: Bus) {
 
                 let mut update = channel.handle_update(msg).unwrap();
                 if BOB_ACCEPTS_NORMAL_CLOSE {
-                    update.accept().unwrap();
-                    update.apply().unwrap();
+                    update.accept(&mut channel).unwrap();
+                    update.apply(&mut channel).unwrap();
                     bus.service_rx.recv().unwrap(); // Ack message for the new state.
                     print_bold!("Bob done: Channel closed normally and the Watcher has the data");
                     return;
                 } else {
-                    update.reject("Bob configured to reject normal close");
+                    update.reject(&mut channel, "Bob configured to reject normal close");
                 }
             }
             Ok(_) => panic!("Unexpected message"),

@@ -84,8 +84,8 @@ impl Signer {
 
     /// Recover the Public Key from a signature.
     ///
-    /// Hash is the hash of the data given to [eth_sign()], it should not include
-    /// the `Ethereum Signed Message` prefix.
+    /// Hash is the hash of the data given to [Self::sign_eth()], it should not
+    /// include the `Ethereum Signed Message` prefix.
     ///
     /// To get the Ethereum Address use `into()`.
     pub fn recover_signer(&self, hash: Hash, eth_sig: Signature) -> Result<Address, Error> {

@@ -18,8 +18,9 @@ type watchEntry struct {
 	Idx    channel.Index
 	watcher.StatesPub
 	watcher.AdjudicatorSub
-	participantAcc wallet.Account // use PreSignedAccount for secure noncustodial signing
-	latest         channel.Transaction
+	participantAcc      wallet.Account // use PreSignedAccount for secure noncustodial signing
+	latest              channel.Transaction
+	onDisputeRegistered func(*channel.RegisteredEvent)
 }
 
 // WatcherService serves a single client, watching and disputing multiple ledger channels.
@@ -41,7 +42,7 @@ func NewWatcherService(
 		adj:      adj}
 }
 
-func (service *WatcherService) Watch(r WatchRequestMsg) error {
+func (service *WatcherService) Watch(r WatchRequestMsg, onDisputeRegistered func(*channel.RegisteredEvent)) error {
 	if !r.VerifyIntegrity() {
 		return errors.New("invalid request")
 	}
@@ -76,12 +77,14 @@ func (service *WatcherService) Watch(r WatchRequestMsg) error {
 				return nil, err
 			}
 			entry = &watchEntry{
-				Params:         *r.State.Params,
-				Idx:            r.Participant,
-				StatesPub:      pub,
-				AdjudicatorSub: sub,
-				participantAcc: r.AuthSigner,
-				latest:         latestTx}
+				Params:              *r.State.Params,
+				Idx:                 r.Participant,
+				StatesPub:           pub,
+				AdjudicatorSub:      sub,
+				participantAcc:      r.AuthSigner,
+				latest:              latestTx,
+				onDisputeRegistered: onDisputeRegistered,
+			}
 			service.watching[id] = entry
 
 			go service.watchAndWithdraw(entry)
@@ -119,6 +122,11 @@ func (service *WatcherService) watchAndWithdraw(e *watchEntry) error {
 	defer service.watch.StopWatching(context.Background(), e.Params.ID())
 	defer log.Warnln("watchAndWithdraw returns.")
 	for evt := range e.EventStream() {
+		// Notify the device as early as possible
+		if event, ok := evt.(*channel.RegisteredEvent); ok {
+			e.onDisputeRegistered(event)
+		}
+
 		if _, ok := evt.(*channel.ConcludedEvent); ok {
 			break
 		} else {
@@ -158,7 +166,7 @@ func (service *WatcherService) StartDispute(u ForceCloseRequestMsg) error {
 	}
 
 	if u.Latest != nil {
-		err := service.Watch(*u.Latest)
+		err := service.Watch(*u.Latest, func(re *channel.RegisteredEvent) {})
 		if err != nil {
 			panic(err)
 		}

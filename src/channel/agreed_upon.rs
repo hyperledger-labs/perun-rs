@@ -2,7 +2,7 @@ use super::{
     fixed_size_payment::{self},
     signed::SignedChannel,
     withdrawal_auth::make_signed_withdrawal_auths,
-    PartIdx, Peers,
+    InvalidChannel, PartIdx, Peers,
 };
 use crate::{
     abiencode::{
@@ -41,8 +41,13 @@ pub enum AddSignatureError {
     RecoveryFailed(sig::Error),
     AlreadySigned,
     InvalidSignature(Address),
+    // Used to indicate that the incomming message does not match the update.
     InvalidChannelID,
     InvalidVersionNumber,
+    // Used to indicate the wrong channel was passed (i.e. a bug in the
+    // application code).
+    WrongVersion,
+    WrongChannelId,
 }
 impl From<abiencode::Error> for AddSignatureError {
     fn from(e: abiencode::Error) -> Self {
@@ -52,6 +57,14 @@ impl From<abiencode::Error> for AddSignatureError {
 impl From<sig::Error> for AddSignatureError {
     fn from(e: sig::Error) -> Self {
         Self::RecoveryFailed(e)
+    }
+}
+impl From<InvalidChannel> for AddSignatureError {
+    fn from(e: InvalidChannel) -> Self {
+        match e {
+            InvalidChannel::WrongVersion => Self::WrongVersion,
+            InvalidChannel::WrongChannelId => Self::WrongChannelId,
+        }
     }
 }
 
@@ -67,10 +80,10 @@ impl From<abiencode::Error> for BuildError {
 }
 
 #[derive(Debug)]
-pub struct AgreedUponChannel<'a, B: MessageBus> {
+pub struct AgreedUponChannel<'cl, B: MessageBus> {
     part_idx: PartIdx,
     withdraw_receiver: Address,
-    client: &'a PerunClient<B>,
+    client: &'cl PerunClient<B>,
     funding_agreement: Balances,
     init_state: State,
     params: Params,
@@ -78,9 +91,9 @@ pub struct AgreedUponChannel<'a, B: MessageBus> {
     peers: Peers,
 }
 
-impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
+impl<'cl, B: MessageBus> AgreedUponChannel<'cl, B> {
     pub(super) fn new(
-        client: &'a PerunClient<B>,
+        client: &'cl PerunClient<B>,
         funding_agreement: Balances,
         part_idx: PartIdx,
         withdraw_receiver: Address,
@@ -169,14 +182,17 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
         }
     }
 
-    pub fn build(self) -> Result<SignedChannel<'a, B>, BuildError> {
+    pub fn build(self) -> Result<SignedChannel<'cl, B>, (Self, BuildError)> {
         // Make sure we have the signature from all participants. They have
         // already been verified in `add_signature()` or we created it ourselves
         // with `sign()`. At the same time, this loop collects the signatures
         // for the next phase into an array.
         let mut signatures: [Signature; PARTICIPANTS] = [Signature::default(); PARTICIPANTS];
         for (part_idx, s) in self.signatures.iter().enumerate() {
-            signatures[part_idx] = s.ok_or(BuildError::MissingSignatureResponse(part_idx))?;
+            signatures[part_idx] = match s {
+                Some(v) => *v,
+                None => return Err((self, BuildError::MissingSignatureResponse(part_idx))),
+            };
         }
 
         self.client
@@ -186,14 +202,17 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
                 params: self.params,
                 state: self.init_state,
                 signatures,
-                withdrawal_auths: make_signed_withdrawal_auths(
+                withdrawal_auths: match make_signed_withdrawal_auths(
                     &self.client.signer,
                     self.init_state.channel_id(),
                     self.params,
                     self.init_state,
                     self.withdraw_receiver,
                     self.part_idx,
-                )?,
+                ) {
+                    Ok(v) => v,
+                    Err(e) => return Err((self, e.into())),
+                },
             }));
 
         self.client
@@ -219,10 +238,10 @@ impl<'a, B: MessageBus> AgreedUponChannel<'a, B> {
     }
 }
 
-impl<'a, B: MessageBus> TryFrom<AgreedUponChannel<'a, B>> for SignedChannel<'a, B> {
-    type Error = BuildError;
+impl<'cl, B: MessageBus> TryFrom<AgreedUponChannel<'cl, B>> for SignedChannel<'cl, B> {
+    type Error = (AgreedUponChannel<'cl, B>, BuildError);
 
-    fn try_from(value: AgreedUponChannel<'a, B>) -> Result<Self, Self::Error> {
+    fn try_from(value: AgreedUponChannel<'cl, B>) -> Result<Self, Self::Error> {
         value.build()
     }
 }

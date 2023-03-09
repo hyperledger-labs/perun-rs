@@ -27,7 +27,7 @@ mod client;
 pub mod wire;
 
 pub use abiencode::types::{Address, Hash};
-pub use client::PerunClient;
+pub use client::{InvalidProposal, PerunClient};
 
 // TODO: This probably shouldn't be public, but the example currently needs it,
 // since the encoding layer doesn't do decoding, yet.

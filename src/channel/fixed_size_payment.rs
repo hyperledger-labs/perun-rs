@@ -297,15 +297,14 @@ impl<const A: usize, const P: usize> TryFrom<perunwire::Allocation> for Allocati
     fn try_from(value: perunwire::Allocation) -> Result<Self, Self::Error> {
         let mut assets = [Asset::default(); A];
         for (a, b) in assets.iter_mut().zip(value.assets) {
-            if b.len() < 2 + 32 + 2 {
-                // We have to at least store two lengths (2 bytes each), the first of which has
-                // to be 32 bytes.
+            if b.len() < 4 {
+                // We have to at least store two lengths (2 bytes each).
                 return Err(ConversionError::ByteLengthMissmatch);
             }
             // chainid
-            let chain_id_length = u16::from_le_bytes(b[..2].try_into().unwrap());
-            let b: &[u8] = &b[2..];
-            if chain_id_length != 32u16 {
+            let chain_id_length: usize = u16::from_le_bytes(b[..2].try_into().unwrap()).into();
+
+            if chain_id_length > 32 || b.len() < 2 + chain_id_length + 2 {
                 // if it is larger than 32 bytes we cannot represent it in this
                 // type, and a larger value (while representable in Go) doesn't
                 // make sense in this context. Additionally, the buffer b has to
@@ -313,18 +312,27 @@ impl<const A: usize, const P: usize> TryFrom<perunwire::Allocation> for Allocati
                 // the first condition.
                 return Err(ConversionError::ByteLengthMissmatch);
             }
-            let mut buffer = [0u8; 32];
-            buffer[(32 - chain_id_length as usize)..].copy_from_slice(&b[..32]);
-            let b = &b[32..];
-            let chain_id = U256::from_big_endian(&buffer);
+            let chain_id = if chain_id_length > 0 {
+                let mut buffer = [0u8; 32];
+                buffer[(32 - chain_id_length as usize)..]
+                    .copy_from_slice(&b[2..2 + chain_id_length]);
+                U256::from_big_endian(&buffer)
+            } else {
+                0.into()
+            };
             // holder
-            let holder_length = u16::from_le_bytes(b[..2].try_into().unwrap());
-            let b: &[u8] = &b[2..];
-            if holder_length != 20u16 || b.len() != holder_length as usize {
+            let holder_length = u16::from_le_bytes(
+                b[2 + chain_id_length..2 + chain_id_length + 2]
+                    .try_into()
+                    .unwrap(),
+            );
+            if holder_length > 20 || b.len() != 2 + chain_id_length + 2 + (holder_length as usize) {
                 return Err(ConversionError::ByteLengthMissmatch);
             }
             let mut holder = Address::default();
-            holder.0.copy_from_slice(&b[..20]);
+            if holder_length > 0 {
+                holder.0.copy_from_slice(&b[2 + chain_id_length + 2..]);
+            }
 
             *a = Asset { chain_id, holder }
         }

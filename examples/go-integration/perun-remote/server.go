@@ -65,6 +65,23 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 
 	var m sync.Mutex
 
+	// Called from another goroutine.
+	//
+	// TODO: Make sure this doesn't cause weird/undefined behavior with conn.
+	// Conn has to be capable of sending things from one goroutine while in a
+	// blocking receive call reading from it. Thanks to the mutex it is not
+	// possible to have multiple goroutines writing to conn.
+	send_dispute_notification := func(re *channel.RegisteredEvent) {
+		channelId := re.ID()
+		sendMsg(&m, conn, &proto.Message{
+			Msg: &proto.Message_DisputeNotification{
+				DisputeNotification: &proto.DisputeNotification{
+					ChannelId: channelId[:],
+				},
+			},
+		})
+	}
+
 	for {
 		msg, err := recvMsg(conn)
 		if err != nil {
@@ -81,7 +98,7 @@ func (s *Server) handleConn(conn io.ReadWriteCloser) {
 					log.Errorf("Invalid watch message: %v", err)
 					return
 				}
-				if err = s.watcher.Watch(*req); err != nil {
+				if err = s.watcher.Watch(*req, send_dispute_notification); err != nil {
 					log.Errorf("Watching channel failed: %v", err)
 				}
 				sendMsg(&m, conn, &proto.Message{Msg: &proto.Message_WatchResponse{
