@@ -1,0 +1,15 @@
+# This is probably not ideal, as it limits us to one memory layout per target.
+# It is however sufficient to distinguish between qemu and the stm board used for testing.
+
+[target.thumbv7m-none-eabi]
+runner = "qemu-system-arm -cpu cortex-m3 -machine lm3s6965evb -nographic -semihosting-config enable=on,target=native -kernel"
+rustflags = [
+    "-C", "link-arg=-Tlink.x",
+    "-L", "linker/lm3s6965evb",
+]
+
+[target.thumbv7em-none-eabihf]
+rustflags = [
+    "-C", "link-arg=-Tlink.x",
+    "-L", "linker/stm32f439",
+]
