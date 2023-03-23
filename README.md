@@ -52,6 +52,9 @@ git submodule update
 # The demo requires nightly, so either set that as a default or use +nightly in each cargo command.
 rustup override set nightly-x86_64-unknown-linux-gnu
 
+# Install device target (on nightly)
+rustup +nightly target install thumbv7em-none-eabihf
+
 # (Optional) Install tools (if not done already).
 cargo install cargo-flash
 
@@ -64,6 +67,23 @@ cd examples/go-integration; go run . ; cd -
 # Compile and Flash to connected device
 cargo flash --chip STM32F439ZITx --target thumbv7em-none-eabihf -p cortex-m-demo --release
 ```
+
+#### Use different IPs
+If you want to use different IPs (for example to use an existing network) there
+are three places that need to be changed:
+- in examples/go-integration/main.go change this line (IP of the device):
+  ```
+  dialer.Register(simple.NewAddress("Bob"), "10.0.0.2:1234")
+  ```
+- in cortex-m-demo/src/main.rs change these two lines (Server is the host
+  running the go-side):
+  ```
+  const DEVICE_IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 2);
+  const SERVER_IP_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 0, 1);
+  ```
+
+Although possible with smoltcp the demo currently does not support DHCP and just
+uses static IPs.
 
 #### Debugging
 In addition to ganache and the go-side:
