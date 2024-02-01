@@ -18,6 +18,9 @@ use perun::{
 use prost::Message;
 use rand::{CryptoRng, Rng};
 
+#[cfg(feature = "std")]
+use std::thread;
+
 #[cfg(not(any(feature = "std", feature = "nostd-example")))]
 compile_error!("When running this example in no_std add the feature flag 'nostd-example'");
 
@@ -66,9 +69,10 @@ fn entry() -> ! {
     loop {}
 }
 
+
 const PARTICIPANTS: [&'static str; 2] = ["Bob", "Alice"];
-const NORMAL_CLOSE: bool = false;
-const SEND_DISPUTE: bool = true;
+const COLLABORATIVE_CLOSE: bool = true;
+const NON_COLLABORATIVE_CLOSE: bool = false;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Config {
@@ -110,16 +114,19 @@ mod net {
     };
 
     pub fn read_config() -> Config {
-        // Some information about the (temporary) blockchain we need, could be hard
-        // coded into the application or received by some other means.
-        let mut config_stream = TcpStream::connect("127.0.0.1:1339").unwrap();
-        let mut buf = [0u8; 20];
+        let buf_eth_holder: [u8; 20] = [
+            0x59, 0x92, 0x08, 0x9d, 0x61, 0xcE, 0x79, 0xB6,
+            0xCF, 0x90, 0x50, 0x6F, 0x70, 0xDD, 0x42, 0xB8,
+            0xE4, 0x2F, 0xB2, 0x1d,
+        ];
+        let eth_holder = Address(buf_eth_holder);
 
-        config_stream.read_exact(&mut buf).unwrap();
-        let eth_holder = Address(buf);
-
-        config_stream.read_exact(&mut buf).unwrap();
-        let withdraw_receiver = Address(buf);
+        let buf_withdraw_receiver: [u8; 20] = [
+            0xc4, 0xbA, 0x48, 0x15, 0xc8, 0x27, 0x27, 0x55,
+            0x4e, 0x4c, 0x12, 0xA0, 0x7a, 0x13, 0x9b, 0x74,
+            0xc6, 0x74, 0x23, 0x22
+        ];
+        let withdraw_receiver = Address(buf_withdraw_receiver);
 
         Config {
             eth_holder,
@@ -140,8 +147,8 @@ mod net {
         pub fn new() -> Self {
             Self {
                 participant: 0,
-                stream: RefCell::new(TcpStream::connect("127.0.0.1:1337").unwrap()),
-                remote_stream: RefCell::new(TcpStream::connect("127.0.0.1:1338").unwrap()),
+                stream: RefCell::new(TcpStream::connect("127.0.0.1:35721").unwrap()), // alice
+                remote_stream: RefCell::new(TcpStream::connect("127.0.0.1:50002").unwrap()),
             }
         }
 
@@ -411,7 +418,19 @@ fn get_rng() -> impl Rng + CryptoRng {
 }
 
 fn get_peers() -> Vec<Vec<u8>> {
-    PARTICIPANTS.map(|p| p.as_bytes().to_vec()).into()
+    const PEER0: [u8; 20] = [
+        0x7b, 0x7E, 0x21, 0x26, 0x52, 0xb9, 0xC3, 0x75,
+        0x5C, 0x4E, 0x1f, 0x17, 0x18, 0xa1, 0x42, 0xdD,
+        0xE3, 0x81, 0x75, 0x23,
+    ];
+
+    const PEER1: [u8; 20] = [
+        0xa6, 0x17, 0xfa, 0x2c, 0xc5, 0xeC, 0x8d, 0x72,
+        0xd4, 0xA6, 0x0b, 0x9F, 0x42, 0x46, 0x77, 0xe7,
+        0x4E, 0x6b, 0xef, 0x68,
+    ];
+
+    vec![PEER0.to_vec(), PEER1.to_vec()]
 }
 
 fn main() {
@@ -434,14 +453,15 @@ fn main() {
 
     // Create channel proposal (user configuration)
     print_user_interaction!("Proposing channel");
-    let init_balance = Balances([ParticipantBalances([100.into(), 100.into()])]);
+    let init_balance = Balances([ParticipantBalances([
+                                                     1_000_000_000_000_000_000u64.into(),
+                                                     1_000_000_000_000_000_000u64.into()])]);
     let prop = LedgerChannelProposal {
         proposal_id: rng.gen(),
-        challenge_duration: 25,
+        challenge_duration: 5,
         nonce_share: rng.gen(),
         init_bals: Allocation::new(
             [Asset {
-                chain_id: 1337.into(), // Default chainID when using a SimulatedBackend from go-ethereum
                 holder: config.eth_holder,
             }],
             init_balance,
@@ -484,12 +504,11 @@ fn main() {
         None => panic!("Envelope did not contain a msg"),
     }
 
-    print_bold!("Bob: Received all signatures, send to watcher/funder");
+    print_bold!("Bob: Received all signatures, send to funder and watcher");
 
     let channel = channel.build().unwrap();
     // Receive acknowledgements (currently not checked but we have to read them
     // anyways).
-    bus.recv_message();
     bus.recv_message();
 
     let mut channel = channel.mark_funded();
@@ -501,17 +520,20 @@ fn main() {
     let update = channel.update(new_state).unwrap();
     handle_update_response(&bus, &mut channel, update);
 
-    if NORMAL_CLOSE {
-        print_user_interaction!("Bob: Propose Normal close");
+    if COLLABORATIVE_CLOSE {
+        print_user_interaction!("Bob: Propose collaborative close (with finalized state)");
         let mut new_state = channel.state().make_next_state();
         // Propose a normal closure
         new_state.is_final = true;
         let update = channel.update(new_state).unwrap();
         handle_update_response(&bus, &mut channel, update);
+
+        channel = channel.force_close().unwrap();
+        bus.recv_message();
     }
 
-    if SEND_DISPUTE {
-        print_user_interaction!("Bob: Send StartDispute Message (force-close)");
+    if NON_COLLABORATIVE_CLOSE {
+        print_user_interaction!("Bob: Propose non-collaborative close (without finalized state)");
         channel.force_close().unwrap();
         bus.recv_message();
     }
